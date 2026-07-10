@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: FlowSync
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  flyway:
+    # 基础骨架阶段尚无数据库迁移；添加首个 V1 脚本后再启用。
+    enabled: false
+    validate-migration-naming: true
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
