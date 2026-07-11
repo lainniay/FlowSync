@@ -109,6 +109,30 @@ mise install
 mise run db
 ```
 
+## VS Code 与 mise
+
+始终用 VS Code 打开仓库根目录 `FlowSync/`，不要只打开 `backend/` 或 `frontend/`。
+
+1. 安装 `hverlin.mise-vscode` 扩展，以及项目所需的 Java 和 Vue/TypeScript 扩展。
+2. 信任当前 VS Code Workspace 和根目录 `mise.toml`。
+3. 运行 `Mise: Open extension settings`，开启 `Configure Extensions Automatically`，关闭 `Include Global Mise Tools`；保持 `Use Shims` 和自动更新环境变量开启。
+4. 运行 `Mise: Reload configuration`，再运行 `Developer: Reload Window`。
+
+如果 Java 扩展仍提示缺少 JDK，运行 `Mise: Configure extension sdk path...`，选择 Java 扩展和 mise 的 Temurin 21，然后运行 `Java: Clean Java Language Server Workspace`。关闭旧的集成终端并新建终端后，用 `mise current` 验证版本。
+
+不要提交扩展生成的 `.vscode/settings.json` 或 SDK 绝对路径；仓库根目录已忽略 `.vscode/`。每位开发者在自己的 IDE 中配置一次即可。
+
+## IntelliJ IDEA 与 mise
+
+1. 在 `Settings | Plugins | Marketplace` 安装 `Mise` 插件并重启 IDEA。
+2. 打开仓库根目录，信任 `mise.toml`，再将 `backend/pom.xml` 作为 Maven 项目导入。
+3. 在 `File | Project Structure | Project SDK` 选择 mise 提供的 Temurin 21。如果未自动出现，在项目终端执行 `mise where java`，通过 `Add SDK | JDK` 添加该目录。
+4. 在 `Settings | Build Tools | Maven` 中，将 Importer JDK 和 Runner JRE 都设为 `Project SDK`，避免 Maven 使用系统 JDK。
+5. 如果 IDEA 提供 Node.js 支持，在 `Settings | Languages & Frameworks | Node.js` 中选择 mise 的 Node 24；未自动出现时，用 `mise which node` 获取本机路径。
+6. 通过 Mise 工具窗口运行仓库任务，并启用插件对 Run Configuration 的 mise 环境加载，使 Spring Boot 获得 `.env` 中的数据库变量。
+
+IDEA 启动后不会自动感知所有 `mise.toml` 或 `.env` 变更。修改配置后重新加载 Mise 配置、重启对应 Run Configuration；仍不一致时重启 IDEA。不要把 `.env` 内容或本机 SDK 路径写入共享的 `.idea/` 文件。
+
 ## 验证环境
 
 在项目根目录执行：
@@ -155,9 +179,13 @@ docker compose down -v
 - 3306 端口被占用：停止本机其他 MySQL，避免修改团队共享的 Compose 端口。
 - Windows 后端启动失败：使用 PowerShell 运行 `mise run backend`，任务会自动调用 `mvnw.cmd`。
 - 配置修改后未生效：关闭旧终端并重新进入项目目录。
+- IDE 终端版本正确但代码分析版本错误：重新配置 IDE 的 SDK/解释器；Shell 激活不会自动修改已经启动的语言服务器。
 
 ## 官方参考
 
 - [mise 安装与 Shell 激活](https://mise.jdx.dev/installing-mise.html)
+- [mise IDE 集成](https://mise.jdx.dev/ide-integration.html)
+- [Mise VS Code 扩展](https://github.com/hverlin/mise-vscode)
+- [Mise IntelliJ 插件](https://plugins.jetbrains.com/plugin/24904-mise)
 - [OrbStack Quick Start](https://docs.orbstack.dev/quick-start)
 - [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/)
