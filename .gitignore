@@ -4,6 +4,8 @@
 *.iml
 *.log
 
+.omo
+
 # Local configuration and secrets
 .env
 .env.*
@@ -18,3 +20,4 @@ frontend/.vite/
 
 # Temporary artifacts
 /tmp/
+.codegraph

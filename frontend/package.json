@@ -9,6 +9,7 @@
     "build": "run-p typecheck \"build-only {@}\" --",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:mock": "vitest run src/__tests__/mocks.spec.ts src/__tests__/mocks-state.spec.ts src/__tests__/admin-separation.spec.ts",
     "build-only": "vite build",
     "typecheck": "vue-tsc --build",
     "lint": "run-s \"lint:*\"",
@@ -36,6 +37,7 @@
     "eslint-plugin-vue": "~10.9.2",
     "jiti": "^2.7.0",
     "jsdom": "^29.1.1",
+    "msw": "^2.15.0",
     "npm-run-all2": "^9.0.2",
     "oxlint": "~1.69.0",
     "typescript": "~6.0.0",
@@ -47,5 +49,10 @@
   },
   "engines": {
     "node": "^22.18.0 || >=24.12.0"
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
   }
 }

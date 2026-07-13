@@ -145,16 +145,182 @@ pnpm --version
 docker compose ps
 mise run test:backend
 mise run test:frontend
+mise run test:mock
 ```
 
 预期 Java 为 21、Node.js 为 24、pnpm 为 11，且 MySQL 状态为 `healthy`。后端和前端测试都应通过。
 
-## 日常开发
+## 前端 Mock API
 
-分别打开两个终端：
+前端使用 MSW 在浏览器中拦截 `/api` 请求。截至当前实现，Mock 覆盖 `docs/api.md` 定义的 45 个接口，
+用于后端尚未完成时独立开发页面、状态管理和错误提示。
+
+- 接口契约以 `docs/api.md` 为准，数据关系以 `docs/relationship.md` 为准。
+- Mock 入口位于 `frontend/src/main.ts`，handlers 位于 `frontend/src/mocks/handlers/`。
+- 初始数据位于 `frontend/src/mocks/store.ts`。
+- Mock 只在 Vite 开发模式且 `VITE_ENABLE_MOCK=true` 时启动。
+- Mock 数据只保存在当前页面内存中，刷新页面会恢复初始数据。
+
+### 启动 Mock 模式
+
+确认仓库根目录的 `.env` 包含：
+
+```dotenv
+VITE_ENABLE_MOCK=true
+```
+
+然后在仓库根目录执行：
+
+```bash
+mise run frontend
+```
+
+`mise run frontend` 会先根据 `pnpm-lock.yaml` 安装依赖，再在 `http://localhost:8081` 启动前端。
+Mock 模式不需要启动后端、MySQL 或配置 AI Key。修改 `.env` 后必须重启 Vite。
+
+浏览器开发者工具出现 `[MSW] Mocking enabled`，并且
+`http://localhost:8081/mockServiceWorker.js` 可以访问时，表示 Mock Worker 已启动。
+
+### 切换到真实后端
+
+将 `.env` 改为：
+
+```dotenv
+VITE_ENABLE_MOCK=false
+```
+
+先启动数据库：
+
+```bash
+mise run db
+```
+
+然后分别启动两个长驻进程。
+
+终端 1：
 
 ```bash
 mise run backend
+```
+
+终端 2：
+
+```bash
+mise run frontend
+```
+
+不要在同一个前端进程中同时使用 Mock 和真实后端；环境变量修改后未重启时，旧配置仍会继续生效。
+
+### 初始账号和数据
+
+以下账号只用于本地 Mock，不能用于真实环境：
+
+| 用户名 | 密码 | 用途 |
+| --- | --- | --- |
+| `admin` | `admin1234` | ADMIN；仅用于系统管理，也是 Mock 启动后的默认当前用户 |
+| `zhangsan` | `user1234` | 项目 owner |
+| `lisi` | `user1234` | 项目成员和任务 assignee |
+| `wangwu` | `user1234` | 有一条待处理邀请的普通用户 |
+| `inactive` | `user1234` | 用于测试停用用户错误 |
+
+初始状态包含普通项目、空项目、归档项目、项目成员、待处理邀请、任务、进度日志、总结和 AI Plan
+响应。登录、创建、修改、归档、恢复和删除产生的变化会保留到当前页面刷新为止。
+
+### CSRF 和会话限制
+
+Mock 与接口契约一样，要求所有 `POST`、`PUT`、`DELETE` 请求携带 `X-CSRF-TOKEN`：
+
+1. 调用 `GET /api/auth/csrf`。
+2. 从响应读取 `token` 和 `headerName`。
+3. 在后续写请求中使用返回的请求头名称和值。
+
+Mock 使用内存中的当前用户模拟登录状态，不会创建真正的 HttpOnly Session Cookie。因此它可以验证页面权限和
+CSRF 请求流程，但不能替代后端对 Cookie、`withCredentials`、多会话失效和会话过期的集成测试。
+
+### 错误响应和输入校验
+
+Mock 按 `docs/api.md` 返回 RFC 9457 Problem Details：
+
+- JSON 语法错误或请求体不是 JSON 对象时返回 `400 BAD_REQUEST`，响应类型为
+  `application/problem+json`。
+- 查询枚举、布尔值、日期、联系方式、AI 参数和资源字段会在运行时校验；TypeScript 类型不能替代该校验。
+- 字段或业务规则校验失败通常返回 `422 VALIDATION_ERROR`，资源冲突返回对应的 `409` 错误码。
+- 批量成员、邀请和 AI Plan 导入会先校验全部元素。失败响应的 `errors` 包含
+  `userIds[1]`、`items[2].title` 等字段路径，并且不会保留本次请求的部分写入。
+
+### 运行 Mock 测试
+
+首次克隆仓库且尚未运行过前端时，先安装锁定版本的依赖：
+
+```bash
+mise run frontend:install
+```
+
+只检查 Mock API：
+
+```bash
+mise run test:mock
+```
+
+也可以在 `frontend/` 目录执行：
+
+```bash
+pnpm test:mock
+```
+
+截至当前实现，基线应显示 3 个 Mock 测试文件、85 项测试全部通过。测试数量以后可能增加，最终以命令输出为准；
+判断成功的标准是所有测试通过且命令退出码为 `0`。
+
+Mock 专项测试覆盖：
+
+- 45 个接口是否全部注册以及主要成功状态码。
+- 资源响应字段、Problem Details 和 `Content-Type`。
+- 登录、CSRF、角色和项目权限。
+- 邀请接受、任务进度、AI Plan 导入等状态变化。
+- 归档写保护、分页排序、查询参数、枚举、日期、联系方式和 AI 参数校验。
+- 成员与 AI Plan 批量请求的字段错误路径和失败回滚。
+
+它不启动 Spring Boot、MySQL 或真实 AI 服务，也不验证真实 Session Cookie、数据库事务和网络代理。完整前端测试使用：
+
+```bash
+mise run test:frontend
+```
+
+### Mock 常见问题
+
+- 页面仍请求真实后端：确认 `.env` 位于仓库根目录、值严格为 `true`，然后重启 Vite。
+- `/mockServiceWorker.js` 返回 404：确认 `frontend/public/mockServiceWorker.js` 存在；缺失时在
+  `frontend/` 执行 `pnpm exec msw init public --save`。
+- 控制台出现 `captured a request without a matching request handler`：请求的方法或路径没有对应 handler，
+  对照 `docs/api.md` 和 `frontend/src/mocks/handlers.ts` 检查。
+- 写请求返回 `403 CSRF_INVALID`：先调用 `/api/auth/csrf`，再携带返回的 CSRF 请求头。
+- 修改数据后刷新即消失：这是内存 Mock 的预期行为，不是数据保存失败。
+- 测试出现 Node `localStorage` ExperimentalWarning：只要测试最终全部通过，该警告不表示 Mock 失败。
+- pnpm 报 MSW build script 被忽略：确认 `frontend/pnpm-workspace.yaml` 中允许 `msw`，然后重新执行
+  `mise run frontend:install`。
+
+生产构建不会执行或注册 Mock。Vite 仍可能把通用的 `mockServiceWorker.js` 复制到 `dist/`，但生产入口受
+`import.meta.env.DEV` 限制，不会加载 handlers 或注册该 Worker。
+
+## 日常开发
+
+使用 Mock 独立开发前端时只需：
+
+```bash
+mise run frontend
+```
+
+与真实后端联调时分别打开两个终端。
+
+终端 1：
+
+```bash
+mise run backend
+```
+
+终端 2：
+
+```bash
 mise run frontend
 ```
 
