@@ -287,7 +287,7 @@ API 只接受以下大写枚举值：
   "id": "101",
   "owner": {
     "id": "1",
-    "displayName": "系统管理员"
+    "displayName": "王强"
   },
   "name": "FlowSync 开发",
   "description": "课程小组项目",
@@ -351,7 +351,7 @@ API 只接受以下大写枚举值：
   },
   "invitedBy": {
     "id": "1",
-    "displayName": "系统管理员"
+    "displayName": "王强"
   },
   "status": "PENDING",
   "createdAt": "2026-07-02T08:30:00Z",
@@ -388,7 +388,7 @@ API 只接受以下大写枚举值：
   },
   "creator": {
     "id": "1",
-    "displayName": "系统管理员"
+    "displayName": "王强"
   },
   "title": "完成登录页面",
   "description": "实现 Session 登录流程",
@@ -1287,7 +1287,7 @@ AI 计划采用以下流程：
       "projectId": "101",
       "parentId": null,
       "assignee": { "id": "2", "displayName": "李明" },
-      "creator": { "id": "1", "displayName": "系统管理员" },
+      "creator": { "id": "1", "displayName": "王强" },
       "title": "实现 Session 登录",
       "description": "完成登录、登出和当前用户接口",
       "status": "NOT_STARTED",
