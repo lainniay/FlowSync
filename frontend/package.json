@@ -9,7 +9,7 @@
     "build": "run-p typecheck \"build-only {@}\" --",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:mock": "vitest run src/__tests__/mocks.spec.ts src/__tests__/mocks-state.spec.ts src/__tests__/admin-separation.spec.ts",
+    "test:mock": "vitest run src/__tests__/mocks.spec.ts src/__tests__/mocks-state.spec.ts src/__tests__/admin-separation.spec.ts src/__tests__/project-deletion.spec.ts src/__tests__/ai-suggestions.spec.ts",
     "build-only": "vite build",
     "typecheck": "vue-tsc --build",
     "lint": "run-s \"lint:*\"",

@@ -190,6 +190,7 @@ Content-Type: application/problem+json
 | `USER_HAS_ACTIVE_TASKS` | 409 | 用户仍负责未完成任务，不能停用 |
 | `USER_HAS_PROJECT_MEMBERSHIP` | 409 | 用户仍有项目成员关系或待处理邀请，不能改为 ADMIN |
 | `PROJECT_ARCHIVED` | 409 | 已归档项目不允许该操作 |
+| `PROJECT_NOT_ARCHIVED` | 409 | 项目尚未归档，不能永久删除 |
 | `MEMBER_ALREADY_EXISTS` | 409 | 用户已经是项目成员 |
 | `MEMBER_HAS_ACTIVE_TASKS` | 409 | 成员仍负责未完成任务，不能移除 |
 | `INVITATION_ALREADY_PENDING` | 409 | 已有待处理邀请 |
@@ -459,7 +460,7 @@ API 只接受以下大写枚举值：
 
 ## 3. 接口总览
 
-权限缩写：`登录用户` 表示任意有效用户；`成员` 表示项目成员；`owner` 表示项目 owner；`ADMIN` 表示系统管理员。
+权限缩写：`登录用户` 表示任意有效用户；`成员` 表示项目成员；`owner` 表示项目 owner；`负责人` 表示当前 task assignee；`ADMIN` 表示系统管理员。
 
 “请求字段”包含路径参数、查询参数和 JSON 请求体字段；具体请求体的类型与校验规则在后续章节展开。“响应字段”只描述成功响应；User、Project、Task 等命名响应的完整字段见第 2 节，错误响应字段见 1.5 节。
 
@@ -483,7 +484,7 @@ API 只接受以下大写枚举值：
 | Projects | `PUT /projects/{projectId}/owner` | 路径参数 `projectId`；`ownerId` | owner 或 ADMIN | 200：Project |
 | Projects | `PUT /projects/{projectId}/archive` | 路径参数 `projectId` | owner 或 ADMIN | 200：Project |
 | Projects | `DELETE /projects/{projectId}/archive` | 路径参数 `projectId` | owner 或 ADMIN | 200：Project |
-| Projects | `DELETE /projects/{projectId}` | 路径参数 `projectId` | owner 或 ADMIN | 204：无响应体 |
+| Projects | `DELETE /projects/{projectId}` | 路径参数 `projectId`，项目必须已归档 | owner 或 ADMIN | 204：无响应体 |
 | Members | `GET /projects/{projectId}/members` | 路径参数 `projectId` | 成员或 ADMIN | 200：ProjectMember[] |
 | Members | `POST /projects/{projectId}/members` | 路径参数 `projectId`；`userIds` | ADMIN | 201：ProjectMember[] |
 | Members | `DELETE /projects/{projectId}/members/{userId}` | 路径参数 `projectId`, `userId` | owner 或 ADMIN | 204：无响应体 |
@@ -507,7 +508,7 @@ API 只接受以下大写枚举值：
 | Summaries | `PUT /summaries/{summaryId}` | 路径参数 `summaryId`；`type`, `content` | 创建者或 owner | 200：Summary |
 | Summaries | `DELETE /summaries/{summaryId}` | 路径参数 `summaryId` | 创建者或 owner | 204：无响应体 |
 | Overview | `GET /overview` | 查询参数 `projectId` | 登录用户 | 200：Overview |
-| AI | `POST /ai/task-suggestions` | `taskId`, `focus` | owner | 200：`suggestion`, `generatedAt` |
+| AI | `POST /ai/task-suggestions` | `taskId`, `focus` | owner 或负责人 | 200：`suggestion`, `generatedAt` |
 | AI | `POST /projects/{projectId}/ai/task-plans` | 路径参数 `projectId`；见 9.2 | owner | 200：AiTaskPlan |
 | AI | `POST /projects/{projectId}/ai/task-plans/imports` | 路径参数 `projectId`；`items` | owner | 201：`importedCount`, `tasks` |
 
@@ -764,9 +765,9 @@ API 只接受以下大写枚举值：
 
 - `PUT /projects/{projectId}/archive`：设置 `archivedAt`，返回 `200 Project`。
 - `DELETE /projects/{projectId}/archive`：清空 `archivedAt`，返回恢复后的 `200 Project`。
-- `DELETE /projects/{projectId}`：物理删除空项目，成功返回 `204`。
+- `DELETE /projects/{projectId}`：永久删除已归档项目及其全部关联数据，成功返回 `204`。
 
-归档和恢复无请求体。已归档项目保留历史数据，不能继续新增成员、邀请、任务或修改业务数据。项目存在 Task 或 Summary 时不能物理删除；删除空项目时，在同一事务内删除其成员和邀请。
+归档、恢复和删除均无请求体。未归档项目不能直接删除，调用删除接口时返回 `409 PROJECT_NOT_ARCHIVED`；必须先归档，再单独确认永久删除。已归档项目保留历史数据，不能继续新增成员、邀请、任务或修改业务数据。删除项目是不可撤销的显式聚合删除：后端必须在同一事务内删除项目的 Summary、TaskLog、Task、ProjectInvitation、ProjectMember 和 Project，任一步失败时整体回滚。该接口不依赖数据库隐式级联删除。
 
 ### 6.6 查询项目成员
 
@@ -1094,12 +1095,16 @@ owner 或该日志创建者可以删除，成功返回 `204`。
 
 ## 9. AI 接口
 
+AI 只生成临时建议或临时任务计划，不能直接写入 Task、TaskLog、Summary 或其他业务记录。
+所有 AI 输出必须由具有对应权限的 `systemRole=USER` 用户人工审阅；需要进入业务记录的
+内容必须由该用户通过正常业务接口提交，AI Provider 和 ADMIN 不能代替业务用户提交。
+
 AI 计划采用以下流程：
 
-1. 调用方提交项目目标。
+1. 项目 owner 以 USER 身份提交项目目标。
 2. 后端调用 AI，返回初步 `AiTaskPlan`。
-3. 调用方编辑计划内容。
-4. 调用方把编辑后的 `items` 提交导入接口。
+3. owner 人工审阅并编辑计划内容。
+4. owner 以当前 USER Session 把最终确认的 `items` 提交导入接口。
 5. 后端校验全部条目，并在同一事务中创建 Task。
 
 `AiTaskPlan` 是临时响应 DTO，不写入数据库，不创建 `planId`，也不建立 AI 计划表。只有最终导入的 Task 会持久化。
@@ -1113,18 +1118,18 @@ AI 计划采用以下流程：
 | 请求字段 | 类型 | 必填 | 规则 |
 | --- | --- | --- | --- |
 | `taskId` | string | 是 | 有效任务 ID |
-| `focus` | string/null | 否 | 希望 AI 重点回答的内容 |
+| `focus` | string/null | 否 | 希望 AI 重点回答的内容，可包含实际进展并要求生成 TaskLog 草稿 |
 
 请求体示例：
 
 ```json
 {
   "taskId": "501",
-  "focus": "给出下一步实施建议"
+  "focus": "根据以下实际进展生成 TaskLog 草稿：登录表单已完成，正在联调接口"
 }
 ```
 
-仅 owner 可调用。
+仅项目 owner 或当前 task assignee 可调用。未负责该任务的普通 member 和 ADMIN 不能调用。
 
 响应字段：
 
@@ -1137,10 +1142,15 @@ AI 计划采用以下流程：
 
 ```json
 {
-  "suggestion": "先补充登录失败和 Session 过期测试，再连接真实接口。",
+  "suggestion": "登录表单及校验功能已完成，当前正在进行接口联调。",
   "generatedAt": "2026-07-13T09:30:00Z"
 }
 ```
+
+`suggestion` 是临时内容，不写入 Task、TaskLog 或 Summary。用于 TaskLog 草稿时，
+`progressPercent` 和实际进展必须由 USER 提供；AI 不能自行认定真实完成度。owner 或当前
+assignee 必须人工审阅并可编辑建议，再通过 `POST /tasks/{taskId}/logs` 提交最终内容，
+最终 `operator` 从当前 Session 取得。
 
 ### 9.2 生成初步任务计划
 
@@ -1210,13 +1220,15 @@ AI 计划采用以下流程：
 }
 ```
 
-调用方可以修改、增加、删除或重新排序 `items`。此时数据不由服务端持久化。
+owner 必须以 USER 身份人工审阅计划，并可以修改、增加、删除或重新排序 `items`。此时
+数据不由服务端持久化。
 
 ### 9.3 导入编辑后的任务计划
 
 `POST /projects/{projectId}/ai/task-plans/imports`
 
-请求体不是上一步完整响应，只提交最终确认的 `items`。
+请求体不是上一步完整响应，只提交经 owner 人工审阅和编辑后最终确认的 `items`。导入请求
+必须来自当前 owner 的 USER Session；AI Provider 和 ADMIN 不能调用导入接口。
 
 请求字段：
 
@@ -1306,14 +1318,15 @@ AI 计划采用以下流程：
 ## 10. 关键业务与事务规则
 
 - `User.systemRole` 只表示系统级 `ADMIN` 或 `USER`，不表示项目角色。
-- ADMIN 是独立的系统管理账号，可以查看全部项目并管理项目、owner 和成员，但不能成为 owner、成员、被邀请人或任务负责人，也不能写入任务、日志、总结和 AI 计划。
+- ADMIN 是独立的系统管理账号，可以查看全部项目并管理项目、owner 和成员，但不能成为 owner、成员、被邀请人或任务负责人，不能写入任务、日志或总结，也不能调用 AI 接口。
 - 项目 owner 存储在 `Project.ownerId`；普通参与关系存储在 `ProjectMember`。
 - owner 必须同时是项目成员。
 - ADMIN 可把 USER 直接添加为成员；owner 添加成员必须走邀请并由用户接受。
 - 已停用用户不能登录、接收邀请、加入项目或被分配新任务。
 - 创建项目、转移 owner、接受邀请和批量写入涉及的多条记录必须在数据库事务中完成。
 - 批量添加成员、批量邀请和 AI 任务导入必须先完整校验，再统一写入，禁止部分成功。
+- AI 输出必须由具备对应权限的 USER 人工审阅；只有该 USER 通过正常业务接口提交后，内容才会持久化。
 - User 使用 `active=false` 停用，不物理删除。
 - Project 使用 `archivedAt` 归档；归档不是删除。
-- 不隐式级联删除项目或任务历史。删除行为遵守 `docs/relationship.md` 中的外键和引用限制。
+- 只有已归档项目可通过 `DELETE /projects/{projectId}` 显式、事务性地删除整个项目聚合；其他删除行为不隐式级联历史数据，并遵守 `docs/relationship.md` 中的外键和引用限制。
 - 当前版本不使用 `version` 字段，也不实现乐观锁。

@@ -193,14 +193,20 @@ export const projectHandlers = [
     const project = projectById(params.projectId)
     if (!project) return notFound(request)
     if (!canManageProject(project, actor)) return forbidden(request)
-    const inUse = mockState.tasks.some((task) => task.projectId === project.id)
-      || mockState.summaries.some((summary) => summary.projectId === project.id)
-    if (inUse) return conflict(request, 'RESOURCE_IN_USE', '项目仍包含任务或总结')
-    removeRecord(mockState.projects, project.id)
+    if (!project.archivedAt) {
+      return conflict(request, 'PROJECT_NOT_ARCHIVED', '项目必须先归档才能永久删除')
+    }
+    const taskIds = new Set(
+      mockState.tasks.filter((task) => task.projectId === project.id).map((task) => task.id),
+    )
+    mockState.summaries = mockState.summaries.filter((summary) => summary.projectId !== project.id)
+    mockState.taskLogs = mockState.taskLogs.filter((log) => !taskIds.has(log.taskId))
+    mockState.tasks = mockState.tasks.filter((task) => task.projectId !== project.id)
     mockState.members = mockState.members.filter((member) => member.projectId !== project.id)
     mockState.invitations = mockState.invitations.filter(
       (invitation) => invitation.projectId !== project.id,
     )
+    removeRecord(mockState.projects, project.id)
     return new HttpResponse(null, { status: 204 })
   }),
 ]

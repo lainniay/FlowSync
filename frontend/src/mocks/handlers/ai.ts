@@ -39,7 +39,7 @@ export const aiHandlers = [
     const task = taskById(body.taskId)
     const project = task ? projectById(task.projectId) : undefined
     if (!task || !project) return notFound(request)
-    if (!isProjectOwner(project, actor)) return forbidden(request)
+    if (!isProjectOwner(project, actor) && task.assigneeId !== actor.id) return forbidden(request)
     if (project.archivedAt) return conflict(request, 'PROJECT_ARCHIVED', '归档项目不能生成建议')
     const focus = body.focus ? `重点关注${body.focus}。` : ''
     return HttpResponse.json({
