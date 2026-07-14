@@ -128,5 +128,5 @@
 - 项目日期范围存在时，Task.dueDate 必须位于该范围内。
 - Summary.taskId 存在时，必须指向 Summary.projectId 对应项目中的 Task。
 - 外键默认使用 `ON DELETE RESTRICT`；User 使用 `active=false` 停用，不进行物理删除。
-- Project 存在 Task 或 Summary 时不能删除；删除空项目时，必须在同一个事务中删除其 ProjectMember 和 ProjectInvitation。
+- 只有 `archivedAt` 非空的 Project 才能永久删除。删除是显式聚合操作，必须在同一个事务中删除其 Summary、TaskLog、Task、ProjectInvitation、ProjectMember 和 Project；任一步失败时整体回滚，不依赖数据库 `ON DELETE CASCADE`。
 - Task 存在子任务、TaskLog 或 Summary 时不能删除。

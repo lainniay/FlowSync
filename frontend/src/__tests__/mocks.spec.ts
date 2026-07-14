@@ -72,7 +72,7 @@ const contractCases: readonly ContractCase[] = [
   },
   { name: 'PUT project archive', method: 'PUT', path: '/projects/101/archive', status: 200 },
   { name: 'DELETE project archive', method: 'DELETE', path: '/projects/103/archive', status: 200 },
-  { name: 'DELETE project', method: 'DELETE', path: '/projects/102', status: 204 },
+  { name: 'DELETE project', method: 'DELETE', path: '/projects/103', status: 204 },
   { name: 'GET project members', method: 'GET', path: '/projects/101/members', status: 200 },
   {
     name: 'POST project members', method: 'POST', path: '/projects/101/members', status: 201,
