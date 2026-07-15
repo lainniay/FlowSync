@@ -54,7 +54,9 @@ mise install
 mise run db
 ```
 
-按需修改 `.env` 中的本地密码和 `DASHSCOPE_API_KEY`，不要提交该文件。
+启动后端前，必须在 `.env` 中为 `DEFAULT_ADMIN_PASSWORD` 设置每套环境独有的初始管理员密码；
+密码规则为 12 到 64 个 Unicode 字符，且 UTF-8 编码不超过 72 字节。按需修改其他本地密码和
+`DASHSCOPE_API_KEY`，不要提交该文件。
 
 ## Windows
 
