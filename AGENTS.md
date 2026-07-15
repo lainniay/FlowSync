@@ -47,6 +47,13 @@ Do not describe an item as “not currently actionable” merely because it is d
 module responsibilities as defects in an already completed foundation layer. Report the completion level
 and blockers for the current scope separately from deferred follow-up work.
 
+Respect the evaluation scope explicitly requested by the user. For a backend-only review, verify the
+backend against the shared contracts and report frontend or Mock drift as separate frontend follow-up;
+do not make it a backend milestone blocker or modify the frontend merely to pass that review. Apply the
+same separation to a frontend-only review. Require backend, frontend, and Mock parity together only for
+a repository-wide review, an integrated release, or when the user explicitly requests cross-application
+contract synchronization.
+
 ## Build, Test, and Development Commands
 
 Run from the repository root. `mise install` provides Temurin 21, Node 24, and pnpm 11; Maven itself comes from the committed wrapper.
