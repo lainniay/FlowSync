@@ -1,14 +1,25 @@
 package hgc.flowsync.project;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
 
+import hgc.flowsync.common.api.PageResponse;
 import hgc.flowsync.common.error.BusinessException;
 import hgc.flowsync.common.error.ErrorCode;
+import hgc.flowsync.summary.Summary;
+import hgc.flowsync.summary.SummaryMapper;
+import hgc.flowsync.task.Task;
+import hgc.flowsync.task.TaskLog;
+import hgc.flowsync.task.TaskLogMapper;
+import hgc.flowsync.task.TaskMapper;
 import hgc.flowsync.user.CurrentUserService;
 import hgc.flowsync.user.SystemRole;
 import hgc.flowsync.user.User;
 import hgc.flowsync.user.UserMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,18 +29,81 @@ public class ProjectService {
 
 	private final ProjectMapper projectMapper;
 	private final ProjectMemberMapper projectMemberMapper;
+	private final ProjectInvitationMapper projectInvitationMapper;
+	private final TaskMapper taskMapper;
+	private final TaskLogMapper taskLogMapper;
+	private final SummaryMapper summaryMapper;
 	private final UserMapper userMapper;
 	private final CurrentUserService currentUserService;
+	private final ProjectAccessService projectAccessService;
 
 	public ProjectService(
 		ProjectMapper projectMapper,
 		ProjectMemberMapper projectMemberMapper,
+		ProjectInvitationMapper projectInvitationMapper,
+		TaskMapper taskMapper,
+		TaskLogMapper taskLogMapper,
+		SummaryMapper summaryMapper,
 		UserMapper userMapper,
-		CurrentUserService currentUserService) {
+		CurrentUserService currentUserService,
+		ProjectAccessService projectAccessService) {
 		this.projectMapper = projectMapper;
 		this.projectMemberMapper = projectMemberMapper;
+		this.projectInvitationMapper = projectInvitationMapper;
+		this.taskMapper = taskMapper;
+		this.taskLogMapper = taskLogMapper;
+		this.summaryMapper = summaryMapper;
 		this.userMapper = userMapper;
 		this.currentUserService = currentUserService;
+		this.projectAccessService = projectAccessService;
+	}
+
+	@Transactional(readOnly = true)
+	public PageResponse<ProjectResponse> findAll(
+		Authentication authentication,
+		String q,
+		ProjectStatus status,
+		String requestedOwnerId,
+		boolean archived,
+		int page,
+		int size,
+		String sort) {
+		User currentUser = currentUserService.require(authentication);
+		Long ownerId = requestedOwnerId == null ? null : parseId(requestedOwnerId);
+		LambdaQueryWrapper<Project> query = Wrappers.<Project>lambdaQuery()
+			.eq(status != null, Project::getStatus, status)
+			.eq(ownerId != null, Project::getOwnerId, ownerId)
+			.like(q != null && !q.isEmpty(), Project::getName, q)
+			.isNotNull(archived, Project::getArchivedAt)
+			.isNull(!archived, Project::getArchivedAt);
+		if (!projectAccessService.isAdmin(currentUser)) {
+			List<Long> projectIds = projectMemberMapper.selectList(Wrappers.<ProjectMember>lambdaQuery()
+				.select(ProjectMember::getProjectId)
+				.eq(ProjectMember::getUserId, currentUser.getId())).stream()
+				.map(ProjectMember::getProjectId)
+				.toList();
+			if (projectIds.isEmpty()) {
+				return PageResponse.of(List.of(), page, size, 0);
+			}
+			query.in(Project::getId, projectIds);
+		}
+		long totalElements = projectMapper.selectCount(query);
+		applySort(query, sort);
+		query.orderByAsc(Project::getId)
+			.last("LIMIT " + size + " OFFSET " + (long) page * size);
+		return PageResponse.of(
+			projectMapper.selectList(query).stream().map(this::response).toList(),
+			page,
+			size,
+			totalElements);
+	}
+
+	@Transactional(readOnly = true)
+	public ProjectResponse findById(Authentication authentication, Long projectId) {
+		User currentUser = currentUserService.require(authentication);
+		Project project = projectAccessService.requireProject(projectId);
+		projectAccessService.requireMemberOrAdmin(project, currentUser);
+		return response(project);
 	}
 
 	@Transactional
@@ -62,7 +136,111 @@ public class ProjectService {
 		ownerMember.setProjectId(project.getId());
 		ownerMember.setUserId(owner.getId());
 		projectMemberMapper.insert(ownerMember);
-		return ProjectResponse.created(projectMapper.selectById(project.getId()), owner);
+		return response(projectMapper.selectById(project.getId()));
+	}
+
+	@Transactional
+	public ProjectResponse update(
+		Authentication authentication,
+		Long projectId,
+		String name,
+		String description,
+		ProjectStatus status,
+		Priority priority,
+		LocalDate startDate,
+		LocalDate endDate) {
+		User currentUser = currentUserService.requireForUpdate(authentication);
+		Project project = projectAccessService.requireProjectForUpdate(projectId);
+		projectAccessService.requireOwnerOrAdmin(project, currentUser);
+		projectAccessService.requireUnarchived(project);
+		validateDateRange(startDate, endDate);
+		projectMapper.update(null, Wrappers.<Project>lambdaUpdate()
+			.eq(Project::getId, projectId)
+			.set(Project::getName, name)
+			.set(Project::getDescription, description)
+			.set(Project::getStatus, status)
+			.set(Project::getPriority, priority)
+			.set(Project::getStartDate, startDate)
+			.set(Project::getEndDate, endDate));
+		return response(projectMapper.selectById(projectId));
+	}
+
+	@Transactional
+	public ProjectResponse transferOwner(
+		Authentication authentication,
+		Long projectId,
+		String requestedOwnerId) {
+		User currentUser = currentUserService.requireForUpdate(authentication);
+		Project project = projectAccessService.requireProjectForUpdate(projectId);
+		projectAccessService.requireOwnerOrAdmin(project, currentUser);
+		projectAccessService.requireUnarchived(project);
+		User newOwner = activeUserForUpdate(parseId(requestedOwnerId));
+		if (!projectMemberMapper.existsByProjectIdAndUserId(projectId, newOwner.getId())) {
+			ProjectMember member = new ProjectMember();
+			member.setProjectId(projectId);
+			member.setUserId(newOwner.getId());
+			projectMemberMapper.insert(member);
+			cancelPendingInvitation(projectId, newOwner.getId());
+		}
+		projectMapper.update(null, Wrappers.<Project>lambdaUpdate()
+			.eq(Project::getId, projectId)
+			.set(Project::getOwnerId, newOwner.getId()));
+		return response(projectMapper.selectById(projectId));
+	}
+
+	@Transactional
+	public ProjectResponse archive(Authentication authentication, Long projectId) {
+		User currentUser = currentUserService.requireForUpdate(authentication);
+		Project project = projectAccessService.requireProjectForUpdate(projectId);
+		projectAccessService.requireOwnerOrAdmin(project, currentUser);
+		projectAccessService.requireUnarchived(project);
+		projectMapper.update(null, Wrappers.<Project>lambdaUpdate()
+			.eq(Project::getId, projectId)
+			.set(Project::getArchivedAt, LocalDateTime.now()));
+		return response(projectMapper.selectById(projectId));
+	}
+
+	@Transactional
+	public ProjectResponse restore(Authentication authentication, Long projectId) {
+		User currentUser = currentUserService.requireForUpdate(authentication);
+		Project project = projectAccessService.requireProjectForUpdate(projectId);
+		projectAccessService.requireOwnerOrAdmin(project, currentUser);
+		projectAccessService.requireArchived(project);
+		projectMapper.update(null, Wrappers.<Project>lambdaUpdate()
+			.eq(Project::getId, projectId)
+			.set(Project::getArchivedAt, null));
+		return response(projectMapper.selectById(projectId));
+	}
+
+	@Transactional
+	public void delete(Authentication authentication, Long projectId) {
+		User currentUser = currentUserService.requireForUpdate(authentication);
+		Project project = projectAccessService.requireProjectForUpdate(projectId);
+		projectAccessService.requireOwnerOrAdmin(project, currentUser);
+		projectAccessService.requireArchived(project);
+
+		try {
+			List<Long> taskIds = taskMapper.selectList(Wrappers.<Task>lambdaQuery()
+				.select(Task::getId)
+				.eq(Task::getProjectId, projectId)).stream()
+				.map(Task::getId)
+				.toList();
+			summaryMapper.delete(Wrappers.<Summary>lambdaQuery()
+				.eq(Summary::getProjectId, projectId));
+			if (!taskIds.isEmpty()) {
+				taskLogMapper.delete(Wrappers.<TaskLog>lambdaQuery()
+					.in(TaskLog::getTaskId, taskIds));
+			}
+			taskMapper.delete(Wrappers.<Task>lambdaQuery()
+				.eq(Task::getProjectId, projectId));
+			projectInvitationMapper.delete(Wrappers.<ProjectInvitation>lambdaQuery()
+				.eq(ProjectInvitation::getProjectId, projectId));
+			projectMemberMapper.delete(Wrappers.<ProjectMember>lambdaQuery()
+				.eq(ProjectMember::getProjectId, projectId));
+			projectMapper.deleteById(projectId);
+		} catch (DataIntegrityViolationException exception) {
+			throw new BusinessException(ErrorCode.RESOURCE_IN_USE);
+		}
 	}
 
 	private User owner(User currentUser, String requestedOwnerId) {
@@ -82,15 +260,67 @@ public class ProjectService {
 		} catch (NumberFormatException exception) {
 			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
 		}
-		User owner = userMapper.selectOne(Wrappers.<User>lambdaQuery()
-			.eq(User::getId, ownerId)
+		return activeUserForUpdate(ownerId);
+	}
+
+	private User activeUserForUpdate(long userId) {
+		User user = userMapper.selectOne(Wrappers.<User>lambdaQuery()
+			.eq(User::getId, userId)
 			.last("FOR UPDATE"));
-		if (owner == null) {
+		if (user == null) {
 			throw new BusinessException(ErrorCode.NOT_FOUND);
 		}
-		if (!owner.isActive() || owner.getSystemRole() != SystemRole.USER) {
+		if (!user.isActive() || user.getSystemRole() != SystemRole.USER) {
 			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
 		}
-		return owner;
+		return user;
+	}
+
+	private void cancelPendingInvitation(Long projectId, Long inviteeId) {
+		ProjectInvitation invitation = projectInvitationMapper
+			.selectByProjectIdAndInviteeIdForUpdate(projectId, inviteeId);
+		if (invitation != null && invitation.getStatus() == InvitationStatus.PENDING) {
+			invitation.setStatus(InvitationStatus.CANCELLED);
+			invitation.setRespondedAt(LocalDateTime.now());
+			projectInvitationMapper.updateById(invitation);
+		}
+	}
+
+	private ProjectResponse response(Project project) {
+		return ProjectResponse.from(
+			project,
+			userMapper.selectById(project.getOwnerId()),
+			projectMemberMapper.selectCount(Wrappers.<ProjectMember>lambdaQuery()
+				.eq(ProjectMember::getProjectId, project.getId())),
+			taskMapper.countByProjectId(project.getId()),
+			taskMapper.countCompletedByProjectId(project.getId()));
+	}
+
+	private static long parseId(String value) {
+		try {
+			return Long.parseLong(value);
+		} catch (NumberFormatException exception) {
+			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
+		}
+	}
+
+	private static void validateDateRange(LocalDate startDate, LocalDate endDate) {
+		if (startDate != null && endDate != null && endDate.isBefore(startDate)) {
+			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
+		}
+	}
+
+	private static void applySort(LambdaQueryWrapper<Project> query, String sort) {
+		String[] parts = sort.split(",", -1);
+		boolean ascending = parts[1].equals("asc");
+		switch (parts[0]) {
+			case "createdAt" -> query.orderBy(true, ascending, Project::getCreatedAt);
+			case "updatedAt" -> query.orderBy(true, ascending, Project::getUpdatedAt);
+			case "name" -> query.orderBy(true, ascending, Project::getName);
+			case "startDate" -> query.orderBy(true, ascending, Project::getStartDate);
+			case "endDate" -> query.orderBy(true, ascending, Project::getEndDate);
+			case "priority" -> query.orderBy(true, ascending, Project::getPriority);
+			default -> throw new BusinessException(ErrorCode.VALIDATION_ERROR);
+		}
 	}
 }

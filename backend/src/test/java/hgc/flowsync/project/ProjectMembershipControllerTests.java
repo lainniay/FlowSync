@@ -3,6 +3,9 @@ package hgc.flowsync.project;
 import java.util.List;
 import java.util.UUID;
 
+import hgc.flowsync.task.Task;
+import hgc.flowsync.task.TaskMapper;
+import hgc.flowsync.task.TaskStatus;
 import hgc.flowsync.user.SystemRole;
 import hgc.flowsync.user.User;
 import hgc.flowsync.user.UserMapper;
@@ -47,6 +50,8 @@ class ProjectMembershipControllerTests {
 	private ProjectMemberMapper projectMemberMapper;
 	@Autowired
 	private ProjectInvitationMapper projectInvitationMapper;
+	@Autowired
+	private TaskMapper taskMapper;
 	@Autowired
 	private PasswordEncoder passwordEncoder;
 
@@ -197,6 +202,45 @@ class ProjectMembershipControllerTests {
 	}
 
 	@Test
+	void archivedProjectRejectsInvitationCancellationWithoutMutation() throws Exception {
+		User owner = insertUser(SystemRole.USER, true);
+		User admin = insertUser(SystemRole.ADMIN, true);
+		User invitee = insertUser(SystemRole.USER, true);
+		Project project = insertProject(owner);
+		ProjectInvitation invitation = insertInvitation(project, invitee, owner, InvitationStatus.PENDING);
+		project.setArchivedAt(java.time.LocalDateTime.now());
+		projectMapper.updateById(project);
+		LoginSession adminSession = login(admin);
+
+		mockMvc.perform(delete("/api/projects/{projectId}/invitations/{invitationId}",
+				project.getId(), invitation.getId())
+				.session(adminSession.session())
+				.header(adminSession.headerName(), adminSession.token()))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.code").value("PROJECT_ARCHIVED"));
+
+		assertThat(projectInvitationMapper.selectById(invitation.getId()).getStatus())
+			.isEqualTo(InvitationStatus.PENDING);
+	}
+
+	@Test
+	void archivedProjectRejectsInvitationRejectionWithoutMutation() throws Exception {
+		User owner = insertUser(SystemRole.USER, true);
+		User invitee = insertUser(SystemRole.USER, true);
+		Project project = insertProject(owner);
+		ProjectInvitation invitation = insertInvitation(project, invitee, owner, InvitationStatus.PENDING);
+		project.setArchivedAt(java.time.LocalDateTime.now());
+		projectMapper.updateById(project);
+
+		respond(login(invitee), invitation.getId().toString(), InvitationStatus.REJECTED)
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.code").value("PROJECT_ARCHIVED"));
+
+		assertThat(projectInvitationMapper.selectById(invitation.getId()).getStatus())
+			.isEqualTo(InvitationStatus.PENDING);
+	}
+
+	@Test
 	void memberAndInvitationWritesRequireAuthenticationAndCsrf() throws Exception {
 		User owner = insertUser(SystemRole.USER, true);
 		User invitee = insertUser(SystemRole.USER, true);
@@ -213,6 +257,44 @@ class ProjectMembershipControllerTests {
 			.andExpect(jsonPath("$.code").value("CSRF_INVALID"));
 	}
 
+	@Test
+	void ownerAndAdminRemoveOnlyEligibleMembers() throws Exception {
+		User owner = insertUser(SystemRole.USER, true);
+		User member = insertUser(SystemRole.USER, true);
+		User busyMember = insertUser(SystemRole.USER, true);
+		User admin = insertUser(SystemRole.ADMIN, true);
+		User outsider = insertUser(SystemRole.USER, true);
+		Project project = insertProject(owner);
+		insertMember(project, member);
+		insertMember(project, busyMember);
+		insertTask(project, member, TaskStatus.COMPLETED);
+		insertTask(project, busyMember, TaskStatus.IN_PROGRESS);
+
+		deleteMember(login(outsider), project, member)
+			.andExpect(status().isForbidden());
+		deleteMember(login(owner), project, owner)
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.code").value("RESOURCE_IN_USE"));
+		deleteMember(login(owner), project, busyMember)
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.code").value("MEMBER_HAS_ACTIVE_TASKS"));
+		deleteMember(login(owner), project, outsider)
+			.andExpect(status().isNotFound());
+		deleteMember(login(owner), project, member)
+			.andExpect(status().isNoContent())
+			.andExpect(content().string(""));
+		assertThat(projectMemberMapper.existsByProjectIdAndUserId(project.getId(), member.getId())).isFalse();
+
+		User removable = insertUser(SystemRole.USER, true);
+		insertMember(project, removable);
+		deleteMember(login(admin), project, removable).andExpect(status().isNoContent());
+		project.setArchivedAt(java.time.LocalDateTime.now());
+		projectMapper.updateById(project);
+		deleteMember(login(admin), project, busyMember)
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.code").value("PROJECT_ARCHIVED"));
+	}
+
 	private ResultActions postIds(LoginSession session, String path, User... users) throws Exception {
 		return mockMvc.perform(post(path)
 			.session(session.session())
@@ -225,6 +307,13 @@ class ProjectMembershipControllerTests {
 	private ResultActions getMembers(LoginSession session, Project project) throws Exception {
 		return mockMvc.perform(get("/api/projects/{projectId}/members", project.getId())
 			.session(session.session()));
+	}
+
+	private ResultActions deleteMember(LoginSession session, Project project, User user) throws Exception {
+		return mockMvc.perform(delete("/api/projects/{projectId}/members/{userId}",
+				project.getId(), user.getId())
+			.session(session.session())
+			.header(session.headerName(), session.token()));
 	}
 
 	private ResultActions respond(LoginSession session, String invitationId, InvitationStatus status) throws Exception {
@@ -286,6 +375,24 @@ class ProjectMembershipControllerTests {
 		invitation.setStatus(status);
 		projectInvitationMapper.insert(invitation);
 		return projectInvitationMapper.selectById(invitation.getId());
+	}
+
+	private void insertMember(Project project, User user) {
+		ProjectMember member = new ProjectMember();
+		member.setProjectId(project.getId());
+		member.setUserId(user.getId());
+		projectMemberMapper.insert(member);
+	}
+
+	private void insertTask(Project project, User assignee, TaskStatus status) {
+		Task task = new Task();
+		task.setProjectId(project.getId());
+		task.setAssigneeId(assignee.getId());
+		task.setCreatorId(project.getOwnerId());
+		task.setTitle("Membership Task " + UUID.randomUUID());
+		task.setStatus(status);
+		task.setPriority(Priority.MEDIUM);
+		taskMapper.insert(task);
 	}
 
 	record LoginBody(String username, String password) {
