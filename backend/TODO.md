@@ -59,7 +59,8 @@
 - [ ] 在反向代理或认证边界为 `POST /api/auth/login` 增加按账号和来源的限流。
   - 完成标准：连续失败请求受到限制，同时继续统一返回 `INVALID_CREDENTIALS`，不暴露用户名是否存在。
 
-- [ ] 为 JSON 请求体配置大小上限，并按 `docs/api.md` 返回 `413 PAYLOAD_TOO_LARGE`。
+- [x] 为 JSON 请求体配置 1 MiB 大小上限，并按 `docs/api.md` 返回 `413 PAYLOAD_TOO_LARGE`。
+  - 已覆盖已声明 `Content-Length` 和未知长度的流式请求；超过上限时均返回 Problem Details。
 
 - [ ] 部署前决定是否公开 OpenAPI 与 Swagger；不需要公开时在生产配置中关闭或限制访问。
 

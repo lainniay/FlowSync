@@ -154,6 +154,7 @@ Content-Type: application/problem+json
 `errors` 用于字段级错误。批量请求必须指出准确下标，例如 `userIds[1]`、`items[2].title`。批量写入在任意一项失败时整体回滚。
 
 无法解析的 JSON、数组 JSON 或其他非对象 JSON 返回 `400 BAD_REQUEST`，不得返回普通文本或 `500`。
+JSON 请求体上限为 1 MiB（1048576 bytes）；超过上限返回 `413 PAYLOAD_TOO_LARGE`。
 
 Spring MVC 在路由和内容协商阶段产生的错误也使用相同结构。`405`、`406`、`413` 和
 `415` 分别使用 `METHOD_NOT_ALLOWED`、`NOT_ACCEPTABLE`、`PAYLOAD_TOO_LARGE` 和
