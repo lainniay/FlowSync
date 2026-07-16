@@ -55,5 +55,9 @@ class ProjectMemberMapperTests {
 		assertThat(saved.getProjectId()).isEqualTo(project.getId());
 		assertThat(saved.getUserId()).isEqualTo(user.getId());
 		assertThat(saved.getJoinedAt()).isNotNull();
+		assertThat(projectMemberMapper.existsByUserId(user.getId())).isTrue();
+		assertThat(projectMemberMapper.existsByUserId(Long.MAX_VALUE)).isFalse();
+		assertThat(projectMemberMapper.existsByProjectIdAndUserId(project.getId(), user.getId())).isTrue();
+		assertThat(projectMemberMapper.existsByProjectIdAndUserId(project.getId(), Long.MAX_VALUE)).isFalse();
 	}
 }
