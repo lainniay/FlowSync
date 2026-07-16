@@ -22,7 +22,11 @@ class UserServiceTests {
 		UserService userService = new UserService(
 			userMapper,
 			passwordEncoder,
-			mock(SessionRegistry.class));
+			mock(SessionRegistry.class),
+			mock(hgc.flowsync.project.ProjectMapper.class),
+			mock(hgc.flowsync.project.ProjectMemberMapper.class),
+			mock(hgc.flowsync.project.ProjectInvitationMapper.class),
+			mock(hgc.flowsync.task.TaskMapper.class));
 		when(userMapper.selectCount(any())).thenReturn(0L);
 		when(passwordEncoder.encode("initial-test-password")).thenReturn("encoded-password");
 		doThrow(new DuplicateKeyException("private database detail"))

@@ -82,5 +82,22 @@ class ProjectInvitationMapperTests {
 		assertThat(saved.getStatus()).isEqualTo(InvitationStatus.ACCEPTED);
 		assertThat(saved.getCreatedAt()).isNotNull();
 		assertThat(saved.getRespondedAt()).isEqualTo(respondedAt);
+
+		User pendingInvitee = new User();
+		pendingInvitee.setUsername("pending-" + UUID.randomUUID());
+		pendingInvitee.setPasswordHash("test-password-hash");
+		pendingInvitee.setDisplayName("Pending Invitee");
+		pendingInvitee.setSystemRole(SystemRole.USER);
+		assertThat(userMapper.insert(pendingInvitee)).isOne();
+
+		ProjectInvitation pendingInvitation = new ProjectInvitation();
+		pendingInvitation.setProjectId(project.getId());
+		pendingInvitation.setInviteeId(pendingInvitee.getId());
+		pendingInvitation.setInvitedBy(inviter.getId());
+		pendingInvitation.setStatus(InvitationStatus.PENDING);
+		assertThat(projectInvitationMapper.insert(pendingInvitation)).isOne();
+
+		assertThat(projectInvitationMapper.existsPendingByInviteeId(pendingInvitee.getId())).isTrue();
+		assertThat(projectInvitationMapper.existsPendingByInviteeId(invitee.getId())).isFalse();
 	}
 }
