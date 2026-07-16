@@ -1,0 +1,133 @@
+CREATE TABLE users (
+	id BIGINT NOT NULL AUTO_INCREMENT,
+	username VARCHAR(50) NOT NULL,
+	password_hash VARCHAR(100) NOT NULL,
+	display_name VARCHAR(50) NOT NULL,
+	phone VARCHAR(20) NULL,
+	email VARCHAR(100) NULL,
+	system_role VARCHAR(20) NOT NULL,
+	active BOOLEAN NOT NULL DEFAULT TRUE,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT pk_users PRIMARY KEY (id),
+	CONSTRAINT uq_users_username UNIQUE (username),
+	CONSTRAINT chk_users_system_role CHECK (system_role IN ('ADMIN', 'USER'))
+) ENGINE = InnoDB DEFAULT CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+
+CREATE TABLE projects (
+	id BIGINT NOT NULL AUTO_INCREMENT,
+	owner_id BIGINT NOT NULL,
+	name VARCHAR(100) NOT NULL,
+	description VARCHAR(2000) NULL,
+	status VARCHAR(20) NOT NULL,
+	priority VARCHAR(20) NOT NULL,
+	start_date DATE NULL,
+	end_date DATE NULL,
+	archived_at DATETIME NULL,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT pk_projects PRIMARY KEY (id),
+	CONSTRAINT fk_projects_owner FOREIGN KEY (owner_id) REFERENCES users (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT chk_projects_status CHECK (status IN ('NOT_STARTED', 'IN_PROGRESS', 'COMPLETED')),
+	CONSTRAINT chk_projects_priority CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH')),
+	CONSTRAINT chk_projects_date_range CHECK (
+		start_date IS NULL OR end_date IS NULL OR end_date >= start_date
+	)
+) ENGINE = InnoDB DEFAULT CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+
+CREATE TABLE project_members (
+	id BIGINT NOT NULL AUTO_INCREMENT,
+	project_id BIGINT NOT NULL,
+	user_id BIGINT NOT NULL,
+	joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	CONSTRAINT pk_project_members PRIMARY KEY (id),
+	CONSTRAINT uq_project_members_project_user UNIQUE (project_id, user_id),
+	CONSTRAINT fk_project_members_project FOREIGN KEY (project_id) REFERENCES projects (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT fk_project_members_user FOREIGN KEY (user_id) REFERENCES users (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB DEFAULT CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+
+CREATE TABLE project_invitations (
+	id BIGINT NOT NULL AUTO_INCREMENT,
+	project_id BIGINT NOT NULL,
+	invitee_id BIGINT NOT NULL,
+	invited_by BIGINT NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	responded_at DATETIME NULL,
+	CONSTRAINT pk_project_invitations PRIMARY KEY (id),
+	CONSTRAINT uq_project_invitations_project_invitee UNIQUE (project_id, invitee_id),
+	CONSTRAINT fk_project_invitations_project FOREIGN KEY (project_id) REFERENCES projects (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT fk_project_invitations_invitee FOREIGN KEY (invitee_id) REFERENCES users (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT fk_project_invitations_inviter FOREIGN KEY (invited_by) REFERENCES users (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT chk_project_invitations_status CHECK (
+		status IN ('PENDING', 'ACCEPTED', 'REJECTED', 'CANCELLED')
+	)
+) ENGINE = InnoDB DEFAULT CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+
+CREATE TABLE tasks (
+	id BIGINT NOT NULL AUTO_INCREMENT,
+	project_id BIGINT NOT NULL,
+	parent_id BIGINT NULL,
+	assignee_id BIGINT NULL,
+	creator_id BIGINT NOT NULL,
+	title VARCHAR(100) NOT NULL,
+	description VARCHAR(5000) NULL,
+	status VARCHAR(20) NOT NULL,
+	priority VARCHAR(20) NOT NULL,
+	due_date DATE NULL,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT pk_tasks PRIMARY KEY (id),
+	CONSTRAINT fk_tasks_project FOREIGN KEY (project_id) REFERENCES projects (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT fk_tasks_parent FOREIGN KEY (parent_id) REFERENCES tasks (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT fk_tasks_assignee FOREIGN KEY (assignee_id) REFERENCES users (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT fk_tasks_creator FOREIGN KEY (creator_id) REFERENCES users (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT chk_tasks_status CHECK (
+		status IN ('NOT_STARTED', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED', 'CANCELLED')
+	),
+	CONSTRAINT chk_tasks_priority CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH'))
+) ENGINE = InnoDB DEFAULT CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+
+CREATE TABLE task_logs (
+	id BIGINT NOT NULL AUTO_INCREMENT,
+	task_id BIGINT NOT NULL,
+	operator_id BIGINT NOT NULL,
+	progress_percent INT NOT NULL,
+	content VARCHAR(1000) NOT NULL,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	CONSTRAINT pk_task_logs PRIMARY KEY (id),
+	CONSTRAINT fk_task_logs_task FOREIGN KEY (task_id) REFERENCES tasks (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT fk_task_logs_operator FOREIGN KEY (operator_id) REFERENCES users (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT chk_task_logs_progress CHECK (progress_percent BETWEEN 0 AND 100)
+) ENGINE = InnoDB DEFAULT CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;
+
+CREATE TABLE summaries (
+	id BIGINT NOT NULL AUTO_INCREMENT,
+	project_id BIGINT NOT NULL,
+	task_id BIGINT NULL,
+	created_by BIGINT NOT NULL,
+	type VARCHAR(20) NOT NULL,
+	content TEXT NOT NULL,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT pk_summaries PRIMARY KEY (id),
+	CONSTRAINT fk_summaries_project FOREIGN KEY (project_id) REFERENCES projects (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT fk_summaries_task FOREIGN KEY (task_id) REFERENCES tasks (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT fk_summaries_creator FOREIGN KEY (created_by) REFERENCES users (id)
+		ON DELETE RESTRICT ON UPDATE RESTRICT,
+	CONSTRAINT chk_summaries_type CHECK (type IN ('STAGE', 'FINAL'))
+) ENGINE = InnoDB DEFAULT CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci;

@@ -155,6 +155,12 @@ Content-Type: application/problem+json
 
 无法解析的 JSON、数组 JSON 或其他非对象 JSON 返回 `400 BAD_REQUEST`，不得返回普通文本或 `500`。
 
+Spring MVC 在路由和内容协商阶段产生的错误也使用相同结构。`405`、`406`、`413` 和
+`415` 分别使用 `METHOD_NOT_ALLOWED`、`NOT_ACCEPTABLE`、`PAYLOAD_TOO_LARGE` 和
+`UNSUPPORTED_MEDIA_TYPE`。Spring MVC 尚未识别的状态不得把默认错误体直接暴露给客户端，
+统一降级为 `500 INTERNAL_SERVER_ERROR`。Spring Security 的 `401`、`403` 和 CSRF 错误
+使用同一个 Problem Details 结构。
+
 ### 1.6 HTTP 状态码
 
 | 状态码 | 含义 | 常见场景 |
@@ -166,7 +172,11 @@ Content-Type: application/problem+json
 | `401 Unauthorized` | 未登录或凭据错误 | Session 失效、登录失败 |
 | `403 Forbidden` | 已登录但无权限 | 普通成员管理项目 |
 | `404 Not Found` | 资源不存在或当前用户不可见 | ID 不存在 |
+| `405 Method Not Allowed` | 请求方法不受支持 | 对只读接口发送 PUT |
+| `406 Not Acceptable` | 无法生成客户端要求的响应格式 | 请求不支持的 Accept 类型 |
 | `409 Conflict` | 与当前业务状态冲突 | 重复成员、资源仍被引用 |
+| `413 Content Too Large` | 请求体超过大小限制 | 上传内容过大 |
+| `415 Unsupported Media Type` | 请求体媒体类型不受支持 | 使用 text/plain 提交 JSON 接口 |
 | `422 Unprocessable Content` | 参数或字段校验失败 | 枚举、日期、必填字段错误 |
 | `429 Too Many Requests` | 请求过于频繁 | AI 接口限流 |
 | `500 Internal Server Error` | 未预期的服务端错误 | 服务端缺陷 |
@@ -183,7 +193,12 @@ Content-Type: application/problem+json
 | `FORBIDDEN` | 403 | 当前用户没有操作权限 |
 | `CSRF_INVALID` | 403 | CSRF Token 缺失或无效 |
 | `NOT_FOUND` | 404 | 资源不存在 |
+| `METHOD_NOT_ALLOWED` | 405 | 请求方法不受支持 |
+| `NOT_ACCEPTABLE` | 406 | 无法生成客户端要求的响应格式 |
+| `PAYLOAD_TOO_LARGE` | 413 | 请求体超过大小限制 |
+| `UNSUPPORTED_MEDIA_TYPE` | 415 | 请求体媒体类型不受支持 |
 | `VALIDATION_ERROR` | 422 | 字段或查询参数校验失败 |
+| `CURRENT_PASSWORD_INCORRECT` | 422 | 当前密码不正确 |
 | `USERNAME_ALREADY_EXISTS` | 409 | 用户名已存在 |
 | `LAST_ADMIN_REQUIRED` | 409 | 操作会导致系统没有可用管理员 |
 | `USER_OWNS_PROJECT` | 409 | 用户仍是项目 owner，不能停用 |
@@ -197,7 +212,9 @@ Content-Type: application/problem+json
 | `INVALID_INVITATION_STATE` | 409 | 邀请状态不能进行该转换 |
 | `RESOURCE_IN_USE` | 409 | 资源仍被其他记录引用 |
 | `RATE_LIMITED` | 429 | AI 请求超过限制 |
+| `INTERNAL_SERVER_ERROR` | 500 | 未预期的服务端错误 |
 | `AI_PROVIDER_ERROR` | 502 | AI Provider 调用失败 |
+| `SERVICE_UNAVAILABLE` | 503 | 数据库或依赖服务暂时不可用 |
 
 ### 1.7 枚举
 
@@ -530,7 +547,7 @@ API 只接受以下大写枚举值：
 | 请求字段 | 类型 | 必填 | 规则 |
 | --- | --- | --- | --- |
 | `username` | string | 是 | 1 到 50 个字符 |
-| `password` | string | 是 | 不允许为空 |
+| `password` | string | 是 | 不允许为空；UTF-8 编码不得超过 72 字节，超出时按凭据错误处理 |
 
 成功返回 `200` 和当前 User，同时由后端写入 HttpOnly Session Cookie。用户名或密码错误统一返回 `401 INVALID_CREDENTIALS`，不得暴露用户是否存在。
 
@@ -573,7 +590,7 @@ API 只接受以下大写枚举值：
 | 请求字段 | 类型 | 必填 | 规则 |
 | --- | --- | --- | --- |
 | `currentPassword` | string | 是 | 当前密码 |
-| `newPassword` | string | 是 | 符合密码安全策略 |
+| `newPassword` | string | 是 | 12 到 64 个 Unicode 字符，且 UTF-8 编码不超过 72 字节 |
 
 ```json
 {
@@ -582,11 +599,15 @@ API 只接受以下大写枚举值：
 }
 ```
 
-成功返回 `204`，并使该用户已有 Session 失效，用户需要重新登录。当前密码不正确返回 `422 CURRENT_PASSWORD_INCORRECT`。
+新密码不做首尾空白裁剪，也不强制大小写、数字或特殊字符组合。成功返回 `204`，并使该用户
+已有 Session 全部失效，用户需要重新登录。当前密码不正确返回
+`422 CURRENT_PASSWORD_INCORRECT`。
 
 ## 5. 用户管理
 
-本节接口仅限 `ADMIN`。系统首次启动且不存在有效管理员时，后端使用环境变量 `DEFAULT_ADMIN_USERNAME` 和 `DEFAULT_ADMIN_PASSWORD` 创建首个管理员。
+本节接口仅限 `ADMIN`。系统首次启动且不存在有效管理员时，后端使用环境变量
+`DEFAULT_ADMIN_USERNAME` 和 `DEFAULT_ADMIN_PASSWORD` 创建首个管理员；初始密码必须符合
+4.5 节的密码安全策略。
 
 ### 5.1 查询用户列表
 
@@ -621,7 +642,7 @@ API 只接受以下大写枚举值：
 | 请求字段 | 类型 | 必填 | 规则 |
 | --- | --- | --- | --- |
 | `username` | string | 是 | 1 到 50，唯一 |
-| `initialPassword` | string | 是 | 由后端按安全策略校验并加密存储 |
+| `initialPassword` | string | 是 | 符合 4.5 节的密码安全策略，并由后端加密存储 |
 | `displayName` | string | 是 | 1 到 50 |
 | `systemRole` | SystemRole | 是 | `ADMIN` 或 `USER` |
 | `phone` | string/null | 是 | 最长 20 |
@@ -662,7 +683,7 @@ API 只接受以下大写枚举值：
 
 | 请求字段 | 类型 | 必填 | 规则 |
 | --- | --- | --- | --- |
-| `newPassword` | string | 是 | 符合密码安全策略 |
+| `newPassword` | string | 是 | 符合 4.5 节的密码安全策略 |
 
 ```json
 {
