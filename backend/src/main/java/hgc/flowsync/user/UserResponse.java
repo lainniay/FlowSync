@@ -1,7 +1,8 @@
 package hgc.flowsync.user;
 
 import java.time.Instant;
-import java.time.ZoneId;
+
+import hgc.flowsync.common.time.ApiDateTime;
 
 public record UserResponse(
 	String id,
@@ -14,8 +15,6 @@ public record UserResponse(
 	Instant createdAt,
 	Instant updatedAt) {
 
-	private static final ZoneId DATABASE_ZONE = ZoneId.of("Asia/Shanghai");
-
 	public static UserResponse from(User user) {
 		return new UserResponse(
 			user.getId().toString(),
@@ -25,7 +24,7 @@ public record UserResponse(
 			user.getEmail(),
 			user.getSystemRole(),
 			user.isActive(),
-			user.getCreatedAt().atZone(DATABASE_ZONE).toInstant(),
-			user.getUpdatedAt().atZone(DATABASE_ZONE).toInstant());
+			ApiDateTime.toInstant(user.getCreatedAt()),
+			ApiDateTime.toInstant(user.getUpdatedAt()));
 	}
 }
