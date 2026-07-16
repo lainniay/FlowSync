@@ -8,11 +8,13 @@ import java.util.Map;
 
 import hgc.flowsync.common.error.BusinessException;
 import hgc.flowsync.common.error.ErrorCode;
+import hgc.flowsync.task.TaskMapper;
 import hgc.flowsync.user.CurrentUserService;
 import hgc.flowsync.user.SystemRole;
 import hgc.flowsync.user.User;
 import hgc.flowsync.user.UserMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -23,6 +25,7 @@ public class ProjectMemberService {
 
 	private final ProjectMemberMapper projectMemberMapper;
 	private final ProjectInvitationMapper projectInvitationMapper;
+	private final TaskMapper taskMapper;
 	private final UserMapper userMapper;
 	private final CurrentUserService currentUserService;
 	private final ProjectAccessService projectAccessService;
@@ -30,11 +33,13 @@ public class ProjectMemberService {
 	public ProjectMemberService(
 		ProjectMemberMapper projectMemberMapper,
 		ProjectInvitationMapper projectInvitationMapper,
+		TaskMapper taskMapper,
 		UserMapper userMapper,
 		CurrentUserService currentUserService,
 		ProjectAccessService projectAccessService) {
 		this.projectMemberMapper = projectMemberMapper;
 		this.projectInvitationMapper = projectInvitationMapper;
+		this.taskMapper = taskMapper;
 		this.userMapper = userMapper;
 		this.currentUserService = currentUserService;
 		this.projectAccessService = projectAccessService;
@@ -80,6 +85,30 @@ public class ProjectMemberService {
 			return userIds.stream().map(userId -> add(projectId, users.get(userId))).toList();
 		} catch (DuplicateKeyException exception) {
 			throw new BusinessException(ErrorCode.MEMBER_ALREADY_EXISTS);
+		}
+	}
+
+	@Transactional
+	public void remove(Authentication authentication, Long projectId, Long userId) {
+		User currentUser = currentUserService.requireForUpdate(authentication);
+		Project project = projectAccessService.requireProjectForUpdate(projectId);
+		projectAccessService.requireOwnerOrAdmin(project, currentUser);
+		projectAccessService.requireUnarchived(project);
+		if (project.getOwnerId().equals(userId)) {
+			throw new BusinessException(ErrorCode.RESOURCE_IN_USE);
+		}
+		if (!projectMemberMapper.existsByProjectIdAndUserId(projectId, userId)) {
+			throw new BusinessException(ErrorCode.NOT_FOUND);
+		}
+		if (taskMapper.existsIncompleteByProjectIdAndAssigneeId(projectId, userId)) {
+			throw new BusinessException(ErrorCode.MEMBER_HAS_ACTIVE_TASKS);
+		}
+		try {
+			projectMemberMapper.delete(Wrappers.<ProjectMember>lambdaQuery()
+				.eq(ProjectMember::getProjectId, projectId)
+				.eq(ProjectMember::getUserId, userId));
+		} catch (DataIntegrityViolationException exception) {
+			throw new BusinessException(ErrorCode.RESOURCE_IN_USE);
 		}
 	}
 

@@ -17,7 +17,7 @@
     `DuplicateKeyException`，转换为 `USERNAME_ALREADY_EXISTS`。
   - 完成标准：重复用户名返回约定的 `409` Problem Details，数据库只保留一条记录。
 
-- [ ] 在其余业务 Service 中转换数据库约束冲突。
+- [x] 在其余业务 Service 中转换数据库约束冲突。
   - 为什么：即使写入前检查过数据，并发请求仍可能同时通过检查，最终由数据库的 `UNIQUE`
     约束发现重复。MyBatis-Plus 会把这种失败转换为 Spring 的 `DuplicateKeyException`。
   - 重复数据：写入前先检查；Mapper 写入时捕获 `DuplicateKeyException`，再抛出对应的
@@ -31,7 +31,8 @@
   - 批量操作：必须放在同一个事务中；任意一条失败时，整批回滚，不能部分成功。
   - 已完成：`ProjectMemberService` 转换 `MEMBER_ALREADY_EXISTS`，
     `ProjectInvitationService` 转换 `INVITATION_ALREADY_PENDING`，成员和邀请批量写入已使用事务。
-  - 剩余：实现具体删除接口时转换 `DataIntegrityViolationException`，并覆盖引用阻止删除测试。
+  - 已完成：成员移除和项目永久删除转换 `DataIntegrityViolationException`，并覆盖引用阻止删除与
+    事务回滚测试。
   - 完成标准：上述重复写入均返回约定的 `409` Problem Details；未识别的数据库故障仍返回
     `500 INTERNAL_SERVER_ERROR`；批量失败后数据库没有残留的部分写入。
 
@@ -40,8 +41,8 @@
 - [x] 认证模块产生 `INVALID_CREDENTIALS` 和 `CURRENT_PASSWORD_INCORRECT`，并补充登录失败、
   当前密码错误的契约测试。
 - [x] `UserService` 产生 `USERNAME_ALREADY_EXISTS`。
-- [ ] 项目、成员和邀请 Service 产生 `docs/api.md` 定义的对应 `409` 业务错误码。
-  - 已完成成员直接添加、邀请创建和邀请状态转换；移除成员和项目永久删除随对应接口实现。
+- [x] 项目、成员和邀请 Service 产生 `docs/api.md` 定义的对应 `409` 业务错误码。
+  - 已完成成员直接添加、邀请创建、邀请状态转换、成员移除和项目永久删除。
 - [ ] AI 集成产生 `RATE_LIMITED` 和 `AI_PROVIDER_ERROR`，且不把 AI 提供商的原始异常返回客户端。
 
 - [x] 实现 `PUT /api/users/{userId}`。

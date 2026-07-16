@@ -22,7 +22,12 @@ public record ProjectResponse(
 	Instant createdAt,
 	Instant updatedAt) {
 
-	public static ProjectResponse created(Project project, User owner) {
+	public static ProjectResponse from(
+		Project project,
+		User owner,
+		long memberCount,
+		long totalTasks,
+		long completedTasks) {
 		return new ProjectResponse(
 			project.getId().toString(),
 			UserBrief.from(owner),
@@ -33,8 +38,8 @@ public record ProjectResponse(
 			project.getStartDate(),
 			project.getEndDate(),
 			ApiDateTime.toInstant(project.getArchivedAt()),
-			1,
-			new TaskStats(0, 0),
+			memberCount,
+			new TaskStats(totalTasks, completedTasks),
 			ApiDateTime.toInstant(project.getCreatedAt()),
 			ApiDateTime.toInstant(project.getUpdatedAt()));
 	}
