@@ -1,5 +1,6 @@
 package hgc.flowsync.user;
 
+import hgc.flowsync.common.api.PageResponse;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
@@ -32,7 +33,7 @@ public class UserController {
 
 	@GetMapping("/api/users")
 	@PreAuthorize("hasRole('ADMIN')")
-	UserPageResponse users(
+	PageResponse<UserResponse> users(
 		@RequestParam(required = false) String q,
 		@RequestParam(required = false) SystemRole systemRole,
 		@RequestParam(defaultValue = "true") @Pattern(regexp = "true|false") String active,
