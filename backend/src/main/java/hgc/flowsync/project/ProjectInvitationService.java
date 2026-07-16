@@ -113,6 +113,7 @@ public class ProjectInvitationService {
 		User currentUser = currentUserService.requireForUpdate(authentication);
 		Project project = projectAccessService.requireProjectForUpdate(projectId);
 		projectAccessService.requireOwnerOrAdmin(project, currentUser);
+		projectAccessService.requireUnarchived(project);
 		ProjectInvitation invitation = projectInvitationMapper.selectOne(Wrappers.<ProjectInvitation>lambdaQuery()
 			.eq(ProjectInvitation::getId, invitationId)
 			.eq(ProjectInvitation::getProjectId, projectId)
@@ -142,9 +143,9 @@ public class ProjectInvitationService {
 			throw new BusinessException(ErrorCode.FORBIDDEN);
 		}
 		requirePending(invitation);
+		projectAccessService.requireUnarchived(project);
 
 		if (status == InvitationStatus.ACCEPTED) {
-			projectAccessService.requireUnarchived(project);
 			if (projectMemberMapper.existsByProjectIdAndUserId(project.getId(), currentUser.getId())) {
 				throw new BusinessException(ErrorCode.MEMBER_ALREADY_EXISTS);
 			}

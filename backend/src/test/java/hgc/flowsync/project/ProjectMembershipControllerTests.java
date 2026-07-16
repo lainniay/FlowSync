@@ -202,6 +202,45 @@ class ProjectMembershipControllerTests {
 	}
 
 	@Test
+	void archivedProjectRejectsInvitationCancellationWithoutMutation() throws Exception {
+		User owner = insertUser(SystemRole.USER, true);
+		User admin = insertUser(SystemRole.ADMIN, true);
+		User invitee = insertUser(SystemRole.USER, true);
+		Project project = insertProject(owner);
+		ProjectInvitation invitation = insertInvitation(project, invitee, owner, InvitationStatus.PENDING);
+		project.setArchivedAt(java.time.LocalDateTime.now());
+		projectMapper.updateById(project);
+		LoginSession adminSession = login(admin);
+
+		mockMvc.perform(delete("/api/projects/{projectId}/invitations/{invitationId}",
+				project.getId(), invitation.getId())
+				.session(adminSession.session())
+				.header(adminSession.headerName(), adminSession.token()))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.code").value("PROJECT_ARCHIVED"));
+
+		assertThat(projectInvitationMapper.selectById(invitation.getId()).getStatus())
+			.isEqualTo(InvitationStatus.PENDING);
+	}
+
+	@Test
+	void archivedProjectRejectsInvitationRejectionWithoutMutation() throws Exception {
+		User owner = insertUser(SystemRole.USER, true);
+		User invitee = insertUser(SystemRole.USER, true);
+		Project project = insertProject(owner);
+		ProjectInvitation invitation = insertInvitation(project, invitee, owner, InvitationStatus.PENDING);
+		project.setArchivedAt(java.time.LocalDateTime.now());
+		projectMapper.updateById(project);
+
+		respond(login(invitee), invitation.getId().toString(), InvitationStatus.REJECTED)
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.code").value("PROJECT_ARCHIVED"));
+
+		assertThat(projectInvitationMapper.selectById(invitation.getId()).getStatus())
+			.isEqualTo(InvitationStatus.PENDING);
+	}
+
+	@Test
 	void memberAndInvitationWritesRequireAuthenticationAndCsrf() throws Exception {
 		User owner = insertUser(SystemRole.USER, true);
 		User invitee = insertUser(SystemRole.USER, true);
