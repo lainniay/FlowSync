@@ -29,6 +29,9 @@
   - 注意：不要在 `GlobalExceptionHandler` 中把所有数据库异常统一转换为 `409`，因为它无法
     判断当前执行的是哪项业务，其他数据库故障也不一定是数据冲突。
   - 批量操作：必须放在同一个事务中；任意一条失败时，整批回滚，不能部分成功。
+  - 已完成：`ProjectMemberService` 转换 `MEMBER_ALREADY_EXISTS`，
+    `ProjectInvitationService` 转换 `INVITATION_ALREADY_PENDING`，成员和邀请批量写入已使用事务。
+  - 剩余：实现具体删除接口时转换 `DataIntegrityViolationException`，并覆盖引用阻止删除测试。
   - 完成标准：上述重复写入均返回约定的 `409` Problem Details；未识别的数据库故障仍返回
     `500 INTERNAL_SERVER_ERROR`；批量失败后数据库没有残留的部分写入。
 
@@ -38,6 +41,7 @@
   当前密码错误的契约测试。
 - [x] `UserService` 产生 `USERNAME_ALREADY_EXISTS`。
 - [ ] 项目、成员和邀请 Service 产生 `docs/api.md` 定义的对应 `409` 业务错误码。
+  - 已完成成员直接添加、邀请创建和邀请状态转换；移除成员和项目永久删除随对应接口实现。
 - [ ] AI 集成产生 `RATE_LIMITED` 和 `AI_PROVIDER_ERROR`，且不把 AI 提供商的原始异常返回客户端。
 
 - [x] 实现 `PUT /api/users/{userId}`。

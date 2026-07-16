@@ -12,4 +12,22 @@ public interface TaskMapper extends BaseMapper<Task> {
 			.eq(Task::getAssigneeId, assigneeId)
 			.notIn(Task::getStatus, TaskStatus.COMPLETED, TaskStatus.CANCELLED)) > 0;
 	}
+
+	default boolean existsIncompleteByProjectIdAndAssigneeId(Long projectId, Long assigneeId) {
+		return selectCount(Wrappers.<Task>lambdaQuery()
+			.eq(Task::getProjectId, projectId)
+			.eq(Task::getAssigneeId, assigneeId)
+			.notIn(Task::getStatus, TaskStatus.COMPLETED, TaskStatus.CANCELLED)) > 0;
+	}
+
+	default long countByProjectId(Long projectId) {
+		return selectCount(Wrappers.<Task>lambdaQuery()
+			.eq(Task::getProjectId, projectId));
+	}
+
+	default long countCompletedByProjectId(Long projectId) {
+		return selectCount(Wrappers.<Task>lambdaQuery()
+			.eq(Task::getProjectId, projectId)
+			.eq(Task::getStatus, TaskStatus.COMPLETED));
+	}
 }

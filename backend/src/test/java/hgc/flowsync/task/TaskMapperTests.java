@@ -109,5 +109,14 @@ class TaskMapperTests {
 		assertThat(saved.getUpdatedAt()).isNotNull();
 		assertThat(taskMapper.existsIncompleteByAssigneeId(assignee.getId())).isTrue();
 		assertThat(taskMapper.existsIncompleteByAssigneeId(creator.getId())).isFalse();
+		assertThat(taskMapper.existsIncompleteByProjectIdAndAssigneeId(project.getId(), assignee.getId()))
+			.isTrue();
+		assertThat(taskMapper.existsIncompleteByProjectIdAndAssigneeId(project.getId(), creator.getId()))
+			.isFalse();
+		assertThat(taskMapper.existsIncompleteByProjectIdAndAssigneeId(Long.MAX_VALUE, assignee.getId()))
+			.isFalse();
+		assertThat(taskMapper.countByProjectId(project.getId())).isEqualTo(2);
+		assertThat(taskMapper.countCompletedByProjectId(project.getId())).isOne();
+		assertThat(taskMapper.countByProjectId(Long.MAX_VALUE)).isZero();
 	}
 }
