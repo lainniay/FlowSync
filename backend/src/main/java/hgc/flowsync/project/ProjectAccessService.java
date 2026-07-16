@@ -6,6 +6,7 @@ import hgc.flowsync.common.error.BusinessException;
 import hgc.flowsync.common.error.ErrorCode;
 import hgc.flowsync.user.SystemRole;
 import hgc.flowsync.user.User;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -22,7 +23,19 @@ public class ProjectAccessService {
 	}
 
 	public Project requireProject(Long projectId) {
-		Project project = projectId == null ? null : projectMapper.selectById(projectId);
+		return requireProject(projectId, false);
+	}
+
+	public Project requireProjectForUpdate(Long projectId) {
+		return requireProject(projectId, true);
+	}
+
+	private Project requireProject(Long projectId, boolean forUpdate) {
+		var query = Wrappers.<Project>lambdaQuery().eq(Project::getId, projectId);
+		if (forUpdate) {
+			query.last("FOR UPDATE");
+		}
+		Project project = projectId == null ? null : projectMapper.selectOne(query);
 		if (project == null) {
 			throw new BusinessException(ErrorCode.NOT_FOUND);
 		}

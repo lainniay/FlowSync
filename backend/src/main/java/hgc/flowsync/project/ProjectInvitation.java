@@ -19,6 +19,7 @@ public class ProjectInvitation {
 	private InvitationStatus status;
 	@TableField(insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)
 	private LocalDateTime createdAt;
+	@TableField(updateStrategy = FieldStrategy.ALWAYS)
 	private LocalDateTime respondedAt;
 
 	public Long getId() {
