@@ -75,8 +75,9 @@ class TaskMapperTests {
 		Task parent = new Task();
 		parent.setProjectId(project.getId());
 		parent.setCreatorId(creator.getId());
+		parent.setAssigneeId(creator.getId());
 		parent.setTitle("Parent Task");
-		parent.setStatus(TaskStatus.IN_PROGRESS);
+		parent.setStatus(TaskStatus.COMPLETED);
 		parent.setPriority(Priority.HIGH);
 		assertThat(taskMapper.insert(parent)).isOne();
 
@@ -106,5 +107,7 @@ class TaskMapperTests {
 		assertThat(saved.getDueDate()).isEqualTo(LocalDate.of(2026, 7, 20));
 		assertThat(saved.getCreatedAt()).isNotNull();
 		assertThat(saved.getUpdatedAt()).isNotNull();
+		assertThat(taskMapper.existsIncompleteByAssigneeId(assignee.getId())).isTrue();
+		assertThat(taskMapper.existsIncompleteByAssigneeId(creator.getId())).isFalse();
 	}
 }

@@ -61,5 +61,7 @@ class ProjectMapperTests {
 		assertThat(saved.getArchivedAt()).isEqualTo(archivedAt);
 		assertThat(saved.getCreatedAt()).isNotNull();
 		assertThat(saved.getUpdatedAt()).isNotNull();
+		assertThat(projectMapper.existsByOwnerId(owner.getId())).isTrue();
+		assertThat(projectMapper.existsByOwnerId(Long.MAX_VALUE)).isFalse();
 	}
 }

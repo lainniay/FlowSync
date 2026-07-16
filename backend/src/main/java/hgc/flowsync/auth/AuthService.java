@@ -2,6 +2,7 @@ package hgc.flowsync.auth;
 
 import hgc.flowsync.common.error.BusinessException;
 import hgc.flowsync.common.error.ErrorCode;
+import hgc.flowsync.user.CurrentUserService;
 import hgc.flowsync.user.User;
 import hgc.flowsync.user.UserMapper;
 import hgc.flowsync.user.UserResponse;
@@ -35,6 +36,7 @@ public class AuthService {
 	private final PasswordEncoder passwordEncoder;
 	private final SessionRegistry sessionRegistry;
 	private final UserService userService;
+	private final CurrentUserService currentUserService;
 	private final SecurityContextHolderStrategy contextHolderStrategy =
 		SecurityContextHolder.getContextHolderStrategy();
 	private final SecurityContextRepository contextRepository = new HttpSessionSecurityContextRepository();
@@ -46,12 +48,14 @@ public class AuthService {
 		UserMapper userMapper,
 		PasswordEncoder passwordEncoder,
 		SessionRegistry sessionRegistry,
-		UserService userService) {
+		UserService userService,
+		CurrentUserService currentUserService) {
 		this.authenticationManager = authenticationManager;
 		this.userMapper = userMapper;
 		this.passwordEncoder = passwordEncoder;
 		this.sessionRegistry = sessionRegistry;
 		this.userService = userService;
+		this.currentUserService = currentUserService;
 	}
 
 	@Transactional
@@ -83,7 +87,7 @@ public class AuthService {
 	}
 
 	public UserResponse currentUser(Authentication authentication) {
-		return UserResponse.from(currentUserEntity(authentication));
+		return UserResponse.from(currentUserService.require(authentication));
 	}
 
 	@Transactional
@@ -93,7 +97,7 @@ public class AuthService {
 		String phone,
 		String email) {
 		return userService.updateProfile(
-			currentUserEntity(authentication),
+			currentUserService.require(authentication),
 			displayName,
 			phone,
 			email);
@@ -101,27 +105,11 @@ public class AuthService {
 
 	@Transactional
 	public void changePassword(Authentication authentication, String currentPassword, String newPassword) {
-		User user = currentUserEntity(authentication, true);
+		User user = currentUserService.requireForUpdate(authentication);
 		if (!PasswordPolicy.isBcryptCompatible(currentPassword)
 			|| !passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
 			throw new BusinessException(ErrorCode.CURRENT_PASSWORD_INCORRECT);
 		}
 		userService.updatePassword(user, newPassword);
-	}
-
-	private User currentUserEntity(Authentication authentication) {
-		return currentUserEntity(authentication, false);
-	}
-
-	private User currentUserEntity(Authentication authentication, boolean forUpdate) {
-		var query = Wrappers.<User>lambdaQuery().eq(User::getUsername, authentication.getName());
-		if (forUpdate) {
-			query.last("FOR UPDATE");
-		}
-		User user = userMapper.selectOne(query);
-		if (user == null || !user.isActive()) {
-			throw new BusinessException(ErrorCode.UNAUTHORIZED);
-		}
-		return user;
 	}
 }

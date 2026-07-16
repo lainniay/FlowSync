@@ -40,7 +40,7 @@
 - [ ] 项目、成员和邀请 Service 产生 `docs/api.md` 定义的对应 `409` 业务错误码。
 - [ ] AI 集成产生 `RATE_LIMITED` 和 `AI_PROVIDER_ERROR`，且不把 AI 提供商的原始异常返回客户端。
 
-- [ ] 实现 `PUT /api/users/{userId}`。
+- [x] 实现 `PUT /api/users/{userId}`。
   - 前置条件：先完成 Project、ProjectMember、ProjectInvitation 和 Task 的基础查询，才能检查项目
     owner、成员和待处理邀请关系，以及用户是否仍负责未完成任务。
   - 完成标准：支持资料、角色和启用状态的全量更新；保留至少一个有效 ADMIN；角色变化或停用后

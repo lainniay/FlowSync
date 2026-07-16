@@ -62,6 +62,20 @@ public class UserController {
 			body.email());
 	}
 
+	@PutMapping("/api/users/{userId}")
+	@PreAuthorize("hasRole('ADMIN')")
+	UserResponse updateUser(
+		@PathVariable Long userId,
+		@Valid @RequestBody UpdateUserRequest body) {
+		return userService.update(
+			userId,
+			body.displayName(),
+			body.phone(),
+			body.email(),
+			body.systemRole(),
+			body.active());
+	}
+
 	@PutMapping("/api/users/{userId}/password")
 	@PreAuthorize("hasRole('ADMIN')")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
@@ -81,5 +95,13 @@ public class UserController {
 		@JsonProperty(required = true) @NotNull SystemRole systemRole,
 		@JsonProperty(required = true) @Size(max = 20) String phone,
 		@JsonProperty(required = true) @Size(min = 1, max = 100) @Email String email) {
+	}
+
+	record UpdateUserRequest(
+		@JsonProperty(required = true) @NotBlank @Size(max = 50) String displayName,
+		@JsonProperty(required = true) @Size(max = 20) String phone,
+		@JsonProperty(required = true) @Size(min = 1, max = 100) @Email String email,
+		@JsonProperty(required = true) @NotNull SystemRole systemRole,
+		@JsonProperty(required = true) @NotNull Boolean active) {
 	}
 }

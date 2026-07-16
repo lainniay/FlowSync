@@ -2,6 +2,10 @@ package hgc.flowsync.user;
 
 import hgc.flowsync.common.error.BusinessException;
 import hgc.flowsync.common.error.ErrorCode;
+import hgc.flowsync.project.ProjectInvitationMapper;
+import hgc.flowsync.project.ProjectMapper;
+import hgc.flowsync.project.ProjectMemberMapper;
+import hgc.flowsync.task.TaskMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.dao.DuplicateKeyException;
@@ -17,14 +21,26 @@ public class UserService {
 	private final UserMapper userMapper;
 	private final PasswordEncoder passwordEncoder;
 	private final SessionRegistry sessionRegistry;
+	private final ProjectMapper projectMapper;
+	private final ProjectMemberMapper projectMemberMapper;
+	private final ProjectInvitationMapper projectInvitationMapper;
+	private final TaskMapper taskMapper;
 
 	public UserService(
 		UserMapper userMapper,
 		PasswordEncoder passwordEncoder,
-		SessionRegistry sessionRegistry) {
+		SessionRegistry sessionRegistry,
+		ProjectMapper projectMapper,
+		ProjectMemberMapper projectMemberMapper,
+		ProjectInvitationMapper projectInvitationMapper,
+		TaskMapper taskMapper) {
 		this.userMapper = userMapper;
 		this.passwordEncoder = passwordEncoder;
 		this.sessionRegistry = sessionRegistry;
+		this.projectMapper = projectMapper;
+		this.projectMemberMapper = projectMemberMapper;
+		this.projectInvitationMapper = projectInvitationMapper;
+		this.taskMapper = taskMapper;
 	}
 
 	public UserResponse findById(Long userId) {
@@ -101,6 +117,61 @@ public class UserService {
 		updatePassword(user, newPassword);
 	}
 
+	@Transactional
+	public UserResponse update(
+		Long userId,
+		String displayName,
+		String phone,
+		String email,
+		SystemRole systemRole,
+		boolean active) {
+		var activeAdmins = userMapper.selectList(Wrappers.<User>lambdaQuery()
+			.select(User::getId)
+			.eq(User::getSystemRole, SystemRole.ADMIN)
+			.eq(User::isActive, true)
+			.orderByAsc(User::getId)
+			.last("FOR UPDATE"));
+		User user = userMapper.selectOne(Wrappers.<User>lambdaQuery()
+			.eq(User::getId, userId)
+			.last("FOR UPDATE"));
+		if (user == null) {
+			throw new BusinessException(ErrorCode.NOT_FOUND);
+		}
+
+		boolean removesActiveAdmin = user.isActive()
+			&& user.getSystemRole() == SystemRole.ADMIN
+			&& (!active || systemRole != SystemRole.ADMIN);
+		if (removesActiveAdmin && activeAdmins.size() == 1) {
+			throw new BusinessException(ErrorCode.LAST_ADMIN_REQUIRED);
+		}
+		if (user.getSystemRole() == SystemRole.USER && systemRole == SystemRole.ADMIN
+			&& (projectMemberMapper.existsByUserId(userId)
+				|| projectInvitationMapper.existsPendingByInviteeId(userId))) {
+			throw new BusinessException(ErrorCode.USER_HAS_PROJECT_MEMBERSHIP);
+		}
+		if (user.isActive() && !active) {
+			if (projectMapper.existsByOwnerId(userId)) {
+				throw new BusinessException(ErrorCode.USER_OWNS_PROJECT);
+			}
+			if (taskMapper.existsIncompleteByAssigneeId(userId)) {
+				throw new BusinessException(ErrorCode.USER_HAS_ACTIVE_TASKS);
+			}
+		}
+
+		boolean invalidateSessions = user.getSystemRole() != systemRole || user.isActive() && !active;
+		userMapper.update(null, Wrappers.<User>lambdaUpdate()
+			.eq(User::getId, userId)
+			.set(User::getDisplayName, displayName)
+			.set(User::getPhone, phone)
+			.set(User::getEmail, email)
+			.set(User::getSystemRole, systemRole)
+			.set(User::isActive, active));
+		if (invalidateSessions) {
+			invalidateSessions(user.getUsername());
+		}
+		return UserResponse.from(userMapper.selectById(userId));
+	}
+
 	public UserResponse updateProfile(User user, String displayName, String phone, String email) {
 		userMapper.update(null, Wrappers.<User>lambdaUpdate()
 			.eq(User::getId, user.getId())
@@ -114,8 +185,11 @@ public class UserService {
 		userMapper.update(null, Wrappers.<User>lambdaUpdate()
 			.eq(User::getId, user.getId())
 			.set(User::getPasswordHash, passwordEncoder.encode(newPassword)));
-		sessionRegistry.getAllSessions(user.getUsername(), false)
-			.forEach(SessionInformation::expireNow);
+		invalidateSessions(user.getUsername());
+	}
+
+	private void invalidateSessions(String username) {
+		sessionRegistry.getAllSessions(username, false).forEach(SessionInformation::expireNow);
 	}
 
 	private static void applySort(LambdaQueryWrapper<User> query, String sort) {
