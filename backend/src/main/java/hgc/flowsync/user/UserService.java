@@ -1,5 +1,6 @@
 package hgc.flowsync.user;
 
+import hgc.flowsync.common.api.PageResponse;
 import hgc.flowsync.common.error.BusinessException;
 import hgc.flowsync.common.error.ErrorCode;
 import hgc.flowsync.project.ProjectInvitationMapper;
@@ -52,7 +53,7 @@ public class UserService {
 	}
 
 	@Transactional(readOnly = true)
-	public UserPageResponse findAll(
+	public PageResponse<UserResponse> findAll(
 		String q,
 		SystemRole systemRole,
 		boolean active,
@@ -70,12 +71,11 @@ public class UserService {
 		applySort(query, sort);
 		query.orderByAsc(User::getId)
 			.last("LIMIT " + size + " OFFSET " + (long) page * size);
-		return new UserPageResponse(
+		return PageResponse.of(
 			userMapper.selectList(query).stream().map(UserResponse::from).toList(),
 			page,
 			size,
-			totalElements,
-			totalElements == 0 ? 0 : (totalElements - 1) / size + 1);
+			totalElements);
 	}
 
 	@Transactional
