@@ -19,9 +19,11 @@ import hgc.flowsync.user.UserMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Transactional
@@ -100,5 +102,27 @@ class TaskLogSummaryMapperTests {
 		assertThat(savedSummary.getContent()).isEqualTo("Stage summary mapping test");
 		assertThat(savedSummary.getCreatedAt()).isNotNull();
 		assertThat(savedSummary.getUpdatedAt()).isNotNull();
+
+		Summary duplicate = new Summary();
+		duplicate.setProjectId(project.getId());
+		duplicate.setTaskId(task.getId());
+		duplicate.setCreatedBy(user.getId());
+		duplicate.setType(SummaryType.STAGE);
+		duplicate.setContent("A second summary with the same scope and type");
+		assertThat(summaryMapper.insert(duplicate)).isOne();
+		assertThat(summaryMapper.selectCount(com.baomidou.mybatisplus.core.toolkit.Wrappers
+			.<Summary>lambdaQuery()
+			.eq(Summary::getProjectId, project.getId())
+			.eq(Summary::getTaskId, task.getId())
+			.eq(Summary::getType, SummaryType.STAGE))).isEqualTo(2);
+
+		Summary missingTask = new Summary();
+		missingTask.setProjectId(project.getId());
+		missingTask.setTaskId(Long.MAX_VALUE);
+		missingTask.setCreatedBy(user.getId());
+		missingTask.setType(SummaryType.FINAL);
+		missingTask.setContent("Foreign keys reject missing tasks");
+		assertThatThrownBy(() -> summaryMapper.insert(missingTask))
+			.isInstanceOf(DataIntegrityViolationException.class);
 	}
 }
