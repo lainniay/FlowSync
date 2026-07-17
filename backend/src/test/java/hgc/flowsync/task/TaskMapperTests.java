@@ -1,6 +1,8 @@
 package hgc.flowsync.task;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import hgc.flowsync.project.Priority;
@@ -12,6 +14,7 @@ import hgc.flowsync.project.ProjectStatus;
 import hgc.flowsync.user.SystemRole;
 import hgc.flowsync.user.User;
 import hgc.flowsync.user.UserMapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -26,14 +29,16 @@ class TaskMapperTests {
 	private final TaskMapper taskMapper;
 	private final ProjectMapper projectMapper;
 	private final ProjectMemberMapper projectMemberMapper;
+	private final TaskLogMapper taskLogMapper;
 	private final UserMapper userMapper;
 
 	@Autowired
 	TaskMapperTests(TaskMapper taskMapper, ProjectMapper projectMapper,
-			ProjectMemberMapper projectMemberMapper, UserMapper userMapper) {
+			ProjectMemberMapper projectMemberMapper, TaskLogMapper taskLogMapper, UserMapper userMapper) {
 		this.taskMapper = taskMapper;
 		this.projectMapper = projectMapper;
 		this.projectMemberMapper = projectMemberMapper;
+		this.taskLogMapper = taskLogMapper;
 		this.userMapper = userMapper;
 	}
 
@@ -118,5 +123,80 @@ class TaskMapperTests {
 		assertThat(taskMapper.countByProjectId(project.getId())).isEqualTo(2);
 		assertThat(taskMapper.countCompletedByProjectId(project.getId())).isOne();
 		assertThat(taskMapper.countByProjectId(Long.MAX_VALUE)).isZero();
+	}
+
+	@Test
+	void selectLatestProgressByTaskIdsReturnsOneLatestLogPerTask() {
+		assertThat(taskMapper.selectLatestProgressByTaskIds(null)).isEmpty();
+		assertThat(taskMapper.selectLatestProgressByTaskIds(List.of())).isEmpty();
+
+		User user = new User();
+		user.setUsername("task-progress-" + UUID.randomUUID());
+		user.setPasswordHash("test-password-hash");
+		user.setDisplayName("Task Progress User");
+		user.setSystemRole(SystemRole.USER);
+		assertThat(userMapper.insert(user)).isOne();
+
+		Project project = new Project();
+		project.setOwnerId(user.getId());
+		project.setName("Task Progress Mapper Project");
+		project.setStatus(ProjectStatus.IN_PROGRESS);
+		project.setPriority(Priority.MEDIUM);
+		assertThat(projectMapper.insert(project)).isOne();
+
+		Task latestTask = insertProgressTask(project, user, "Latest Progress Task");
+		Task tieTask = insertProgressTask(project, user, "Tie Progress Task");
+		Task noLogTask = insertProgressTask(project, user, "No Log Task");
+
+		LocalDateTime latestTime = LocalDateTime.of(2026, 7, 10, 12, 0);
+		for (int index = 0; index < 20; index++) {
+			insertProgressLog(latestTask, user, index, latestTime.minusDays(index + 1));
+		}
+		insertProgressLog(latestTask, user, 73, latestTime);
+
+		LocalDateTime tieTime = LocalDateTime.of(2026, 7, 11, 12, 0);
+		TaskLog firstTieLog = insertProgressLog(tieTask, user, 21, tieTime);
+		TaskLog secondTieLog = insertProgressLog(tieTask, user, 84, tieTime);
+		assertThat(secondTieLog.getId()).isGreaterThan(firstTieLog.getId());
+
+		List<TaskMapper.LatestProgress> latestProgress = taskMapper.selectLatestProgressByTaskIds(
+			List.of(latestTask.getId(), latestTask.getId(), tieTask.getId(), noLogTask.getId()));
+
+		assertThat(latestProgress).hasSize(2);
+		assertThat(latestProgress).extracting(TaskMapper.LatestProgress::getTaskId)
+			.containsExactlyInAnyOrder(latestTask.getId(), tieTask.getId());
+		assertThat(latestProgress).anySatisfy(progress -> {
+			assertThat(progress.getTaskId()).isEqualTo(latestTask.getId());
+			assertThat(progress.getProgressPercent()).isEqualTo(73);
+		});
+		assertThat(latestProgress).anySatisfy(progress -> {
+			assertThat(progress.getTaskId()).isEqualTo(tieTask.getId());
+			assertThat(progress.getProgressPercent()).isEqualTo(84);
+		});
+	}
+
+	private Task insertProgressTask(Project project, User user, String title) {
+		Task task = new Task();
+		task.setProjectId(project.getId());
+		task.setCreatorId(user.getId());
+		task.setAssigneeId(user.getId());
+		task.setTitle(title);
+		task.setStatus(TaskStatus.IN_PROGRESS);
+		task.setPriority(Priority.MEDIUM);
+		assertThat(taskMapper.insert(task)).isOne();
+		return task;
+	}
+
+	private TaskLog insertProgressLog(Task task, User user, int progressPercent, LocalDateTime createdAt) {
+		TaskLog log = new TaskLog();
+		log.setTaskId(task.getId());
+		log.setOperatorId(user.getId());
+		log.setProgressPercent(progressPercent);
+		log.setContent("Progress " + progressPercent);
+		assertThat(taskLogMapper.insert(log)).isOne();
+		assertThat(taskLogMapper.update(null, Wrappers.<TaskLog>lambdaUpdate()
+			.eq(TaskLog::getId, log.getId())
+			.set(TaskLog::getCreatedAt, createdAt))).isOne();
+		return log;
 	}
 }
