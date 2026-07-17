@@ -475,6 +475,20 @@ class SummaryControllerTests {
 	}
 
 	@Test
+	void presentButEmptyOrBlankListParametersAreValidationErrors() throws Exception {
+		User owner = insertUser(SystemRole.USER, "Owner");
+		LoginSession session = login(owner);
+
+		for (String query : List.of(
+			"type=", "page=", "size=", "sort=",
+			"type=%20", "page=%20", "size=%20", "sort=%20",
+			"projectId=", "taskId=", "createdBy=")) {
+			assertProblem(summaryRequest(get("/api/summaries?" + query), session, null),
+				422, "VALIDATION_ERROR");
+		}
+	}
+
+	@Test
 	void unrelatedDatabaseFailureIsNotReportedAsResourceInUse() throws Exception {
 		User owner = insertUser(SystemRole.USER, "Owner");
 		Project project = insertProject(owner, ProjectStatus.IN_PROGRESS);

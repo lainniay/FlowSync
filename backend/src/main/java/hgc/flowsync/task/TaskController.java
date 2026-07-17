@@ -1,13 +1,14 @@
 package hgc.flowsync.task;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 
 import hgc.flowsync.common.api.PageResponse;
+import hgc.flowsync.common.error.BusinessException;
+import hgc.flowsync.common.error.ErrorCode;
 import hgc.flowsync.project.Priority;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -38,29 +39,96 @@ public class TaskController {
 		Authentication authentication,
 		@RequestParam(required = false) @Pattern(regexp = "[1-9]\\d*") String projectId,
 		@RequestParam(required = false) @Pattern(regexp = "[1-9]\\d*") String assigneeId,
-		@RequestParam(required = false) TaskStatus status,
-		@RequestParam(required = false) Priority priority,
+		@RequestParam(required = false) String status,
+		@RequestParam(required = false) String priority,
 		@RequestParam(required = false) @Pattern(regexp = "[1-9]\\d*") String parentId,
-		@RequestParam(required = false) LocalDate dueBefore,
-		@RequestParam(required = false) LocalDate dueAfter,
+		@RequestParam(required = false) String dueBefore,
+		@RequestParam(required = false) String dueAfter,
 		@RequestParam(required = false) String q,
-		@RequestParam(defaultValue = "0") @Min(0) int page,
-		@RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
-		@RequestParam(defaultValue = "createdAt,desc")
-		@Pattern(regexp = "(?:createdAt|updatedAt|title|dueDate|priority|status),(?:asc|desc)") String sort) {
+		@RequestParam(required = false) String page,
+		@RequestParam(required = false) String size,
+		@RequestParam(required = false) String sort) {
 		return taskService.findAll(
 			authentication,
 			projectId,
 			assigneeId,
-			status,
-			priority,
+			parseEnum(status, TaskStatus.class),
+			parseEnum(priority, Priority.class),
 			parentId,
-			dueBefore,
-			dueAfter,
-			q,
-			page,
-			size,
-			sort);
+			parseDate(dueBefore),
+			parseDate(dueAfter),
+			optionalNonBlank(q),
+			parseInteger(page, 0, 0, Integer.MAX_VALUE),
+			parseInteger(size, 20, 1, 100),
+			parseSort(sort));
+	}
+
+	private static <E extends Enum<E>> E parseEnum(String value, Class<E> type) {
+		if (value == null) {
+			return null;
+		}
+		if (value.isBlank()) {
+			throw validationError();
+		}
+		try {
+			return Enum.valueOf(type, value);
+		}
+		catch (IllegalArgumentException exception) {
+			throw validationError();
+		}
+	}
+
+	private static LocalDate parseDate(String value) {
+		if (value == null) {
+			return null;
+		}
+		if (value.isBlank()) {
+			throw validationError();
+		}
+		try {
+			return LocalDate.parse(value);
+		}
+		catch (DateTimeParseException exception) {
+			throw validationError();
+		}
+	}
+
+	private static String optionalNonBlank(String value) {
+		if (value != null && value.isBlank()) {
+			throw validationError();
+		}
+		return value;
+	}
+
+	private static int parseInteger(String value, int defaultValue, int minimum, int maximum) {
+		if (value == null) {
+			return defaultValue;
+		}
+		if (value.isBlank()) {
+			throw validationError();
+		}
+		try {
+			int parsed = Integer.parseInt(value);
+			if (parsed < minimum || parsed > maximum) {
+				throw validationError();
+			}
+			return parsed;
+		}
+		catch (NumberFormatException exception) {
+			throw validationError();
+		}
+	}
+
+	private static String parseSort(String value) {
+		String parsed = value == null ? "createdAt,desc" : value;
+		if (!parsed.matches("(?:createdAt|updatedAt|title|dueDate|priority|status),(?:asc|desc)")) {
+			throw validationError();
+		}
+		return parsed;
+	}
+
+	private static BusinessException validationError() {
+		return new BusinessException(ErrorCode.VALIDATION_ERROR);
 	}
 
 	@PostMapping("/api/tasks")
