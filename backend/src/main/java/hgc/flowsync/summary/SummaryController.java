@@ -1,10 +1,10 @@
 package hgc.flowsync.summary;
 
 import hgc.flowsync.common.api.PageResponse;
+import hgc.flowsync.common.error.BusinessException;
+import hgc.flowsync.common.error.ErrorCode;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -34,21 +34,66 @@ public class SummaryController {
 		Authentication authentication,
 		@RequestParam(required = false) @Pattern(regexp = "[1-9]\\d*") String projectId,
 		@RequestParam(required = false) @Pattern(regexp = "(?:none|[1-9]\\d*)") String taskId,
-		@RequestParam(required = false) SummaryType type,
+		@RequestParam(required = false) String type,
 		@RequestParam(required = false) @Pattern(regexp = "[1-9]\\d*") String createdBy,
-		@RequestParam(defaultValue = "0") @Min(0) int page,
-		@RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
-		@RequestParam(defaultValue = "createdAt,desc")
-		@Pattern(regexp = "(?:createdAt|updatedAt|type),(?:asc|desc)") String sort) {
+		@RequestParam(required = false) String page,
+		@RequestParam(required = false) String size,
+		@RequestParam(required = false) String sort) {
 		return summaryService.findAll(
 			authentication,
 			projectId,
 			taskId,
-			type,
+			parseType(type),
 			createdBy,
-			page,
-			size,
-			sort);
+			parseInteger(page, 0, 0, Integer.MAX_VALUE),
+			parseInteger(size, 20, 1, 100),
+			parseSort(sort));
+	}
+
+	private static SummaryType parseType(String value) {
+		if (value == null) {
+			return null;
+		}
+		if (value.isBlank()) {
+			throw validationError();
+		}
+		try {
+			return SummaryType.valueOf(value);
+		}
+		catch (IllegalArgumentException exception) {
+			throw validationError();
+		}
+	}
+
+	private static int parseInteger(String value, int defaultValue, int minimum, int maximum) {
+		if (value == null) {
+			return defaultValue;
+		}
+		if (value.isBlank()) {
+			throw validationError();
+		}
+		try {
+			int parsed = Integer.parseInt(value);
+			if (parsed < minimum || parsed > maximum) {
+				throw validationError();
+			}
+			return parsed;
+		}
+		catch (NumberFormatException exception) {
+			throw validationError();
+		}
+	}
+
+	private static String parseSort(String value) {
+		String parsed = value == null ? "createdAt,desc" : value;
+		if (!parsed.matches("(?:createdAt|updatedAt|type),(?:asc|desc)")) {
+			throw validationError();
+		}
+		return parsed;
+	}
+
+	private static BusinessException validationError() {
+		return new BusinessException(ErrorCode.VALIDATION_ERROR);
 	}
 
 	@PostMapping("/api/summaries")

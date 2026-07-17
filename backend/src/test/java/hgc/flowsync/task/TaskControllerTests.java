@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import hgc.flowsync.common.time.ApiDateTime;
 import hgc.flowsync.project.Priority;
 import hgc.flowsync.project.Project;
 import hgc.flowsync.project.ProjectMapper;
@@ -113,18 +114,29 @@ class TaskControllerTests {
 		MvcResult createdResult = taskRequest(post("/api/tasks"), session, body(project, null, owner))
 			.andExpect(status().isCreated())
 			.andExpect(content().contentType(MediaType.APPLICATION_JSON))
-			.andExpect(jsonPath("$.id", Matchers.instanceOf(String.class)))
-			.andExpect(jsonPath("$.projectId").value(project.getId().toString()))
-			.andExpect(jsonPath("$.parentId").value((Object) null))
-			.andExpect(jsonPath("$.assignee.id").value(owner.getId().toString()))
-			.andExpect(jsonPath("$.creator.id").value(owner.getId().toString()))
-			.andExpect(jsonPath("$.progressPercent").value(0))
-			.andExpect(jsonPath("$.createdAt").value(Matchers.endsWith("Z")))
-			.andExpect(jsonPath("$.updatedAt").value(Matchers.endsWith("Z")))
 			.andExpect(jsonPath("$.owner").doesNotExist())
 			.andReturn();
-		String taskId = objectMapper.readTree(createdResult.getResponse().getContentAsByteArray())
-			.get("id").asText();
+		JsonNode created = objectMapper.readTree(createdResult.getResponse().getContentAsByteArray());
+		String taskId = created.get("id").asText();
+		Task saved = taskMapper.selectById(taskId);
+		assertThat(created.get("id").isTextual()).isTrue();
+		assertThat(created.get("id").asText()).isEqualTo(saved.getId().toString());
+		assertThat(created.get("projectId").asText()).isEqualTo(project.getId().toString());
+		assertThat(created.get("parentId").isNull()).isTrue();
+		assertThat(created.at("/assignee/id").asText()).isEqualTo(owner.getId().toString());
+		assertThat(created.at("/assignee/displayName").asText()).isEqualTo(owner.getDisplayName());
+		assertThat(created.at("/creator/id").asText()).isEqualTo(owner.getId().toString());
+		assertThat(created.at("/creator/displayName").asText()).isEqualTo(owner.getDisplayName());
+		assertThat(created.get("title").asText()).isEqualTo("HTTP Task");
+		assertThat(created.get("description").asText()).isEqualTo("HTTP task description");
+		assertThat(created.get("status").asText()).isEqualTo("NOT_STARTED");
+		assertThat(created.get("priority").asText()).isEqualTo("HIGH");
+		assertThat(created.get("progressPercent").asInt()).isZero();
+		assertThat(created.get("dueDate").asText()).isEqualTo("2026-07-15");
+		assertThat(created.get("createdAt").asText())
+			.isEqualTo(ApiDateTime.toInstant(saved.getCreatedAt()).toString());
+		assertThat(created.get("updatedAt").asText())
+			.isEqualTo(ApiDateTime.toInstant(saved.getUpdatedAt()).toString());
 
 		taskRequest(get("/api/tasks?projectId=" + project.getId()), session, null)
 			.andExpect(status().isOk())
@@ -153,6 +165,21 @@ class TaskControllerTests {
 		taskRequest(delete("/api/tasks/" + taskId), session, null)
 			.andExpect(status().isNoContent());
 		assertThat(taskMapper.selectById(taskId)).isNull();
+	}
+
+	@Test
+	void presentButEmptyOrBlankListParametersAreValidationErrors() throws Exception {
+		User owner = insertUser(SystemRole.USER, true, "Owner");
+		LoginSession session = login(owner);
+
+		for (String query : List.of(
+			"status=", "priority=", "page=", "size=", "sort=",
+			"status=%20", "priority=%20", "page=%20", "size=%20", "sort=%20",
+			"dueBefore=", "dueAfter=", "q=")) {
+			taskRequest(get("/api/tasks?" + query), session, null)
+				.andExpect(status().isUnprocessableEntity())
+				.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+		}
 	}
 
 	@Test
