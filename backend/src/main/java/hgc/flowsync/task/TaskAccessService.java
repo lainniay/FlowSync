@@ -74,6 +74,11 @@ public class TaskAccessService {
 		return context;
 	}
 
+	@Transactional(propagation = Propagation.MANDATORY)
+	public TaskContext requireTaskLogDeleteContext(Authentication authentication, Long taskId) {
+		return writeContext(authentication, taskId);
+	}
+
 	private TaskContext writeContext(Authentication authentication, Long taskId) {
 		User currentUser = currentUserService.requireForUpdate(authentication);
 		Task task = requireTask(taskId);
