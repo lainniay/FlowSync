@@ -18,6 +18,8 @@ export const useAuthStore = defineStore('auth', () => {
   const initialized = ref(false)
   const errorMessage = ref('')
 
+  let initializationPromise: Promise<void> | null = null
+
   async function loadCurrentUser(): Promise<void> {
     loading.value = true
     errorMessage.value = ''
@@ -38,6 +40,18 @@ export const useAuthStore = defineStore('auth', () => {
       loading.value = false
       initialized.value = true
     }
+  }
+
+  async function initialize(): Promise<void> {
+    if (initialized.value) return
+
+    if (!initializationPromise) {
+      initializationPromise = loadCurrentUser().finally(() => {
+        initializationPromise = null
+      })
+    }
+
+    await initializationPromise
   }
 
   async function login(
@@ -62,22 +76,30 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function logout(): Promise<void> {
+  async function logout(): Promise<boolean> {
     loading.value = true
     errorMessage.value = ''
 
     try {
       await requestLogout()
       currentUser.value = null
+      return true
     } catch (error) {
       errorMessage.value = getApiErrorMessage(
         error,
         '退出登录失败',
       )
+      return false
     } finally {
       loading.value = false
       initialized.value = true
     }
+  }
+
+  function clearSession(): void {
+    currentUser.value = null
+    initialized.value = true
+    errorMessage.value = ''
   }
 
   return {
@@ -85,8 +107,10 @@ export const useAuthStore = defineStore('auth', () => {
     loading,
     initialized,
     errorMessage,
+    initialize,
     loadCurrentUser,
     login,
     logout,
+    clearSession,
   }
 })
