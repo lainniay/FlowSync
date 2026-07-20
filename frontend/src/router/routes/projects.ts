@@ -8,4 +8,11 @@ export const projectRoutes: readonly RouteRecordRaw[] = [
       '@/views/projects/ProjectListView.vue'
     ),
   },
+  {
+    path: 'projects/:projectId',
+    name: 'project-detail',
+    component: () => import(
+      '@/views/projects/ProjectDetailView.vue'
+    ),
+  },
 ]

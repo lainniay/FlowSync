@@ -5,6 +5,7 @@ import {
   reactive,
   ref,
 } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   ElAlert,
   ElButton,
@@ -12,6 +13,7 @@ import {
   ElForm,
   ElFormItem,
   ElInput,
+  ElMessage,
   ElOption,
   ElPagination,
   ElSelect,
@@ -26,6 +28,7 @@ import 'element-plus/es/components/empty/style/css'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
 import 'element-plus/es/components/input/style/css'
+import 'element-plus/es/components/message/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/select/style/css'
@@ -38,10 +41,18 @@ import { getApiErrorMessage } from '@/shared/api/errors'
 import type {
   Priority,
   ProjectStatus,
+  User,
 } from '@/shared/api/types'
+import { useAuthStore } from '@/stores/auth'
+import { getUsers } from '@/views/admin/api'
 
-import { getProjects } from './api'
+import {
+  createProject,
+  getProjects,
+} from './api'
+import ProjectFormDialog from './ProjectFormDialog.vue'
 import type {
+  CreateProjectRequest,
   Project,
   ProjectListFilters,
   ProjectListQuery,
@@ -85,6 +96,9 @@ const priorityTagTypes: Record<Priority, TagType> = {
   HIGH: 'danger',
 }
 
+const router = useRouter()
+const authStore = useAuthStore()
+
 function createInitialFilters(): ProjectListFilters {
   return {
     q: '',
@@ -110,6 +124,19 @@ const totalPages = ref(0)
 const loading = ref(false)
 const loaded = ref(false)
 const errorMessage = ref('')
+
+const createDialogVisible = ref(false)
+const formSubmitting = ref(false)
+const ownerOptions = ref<User[]>([])
+
+const isAdmin = computed(() => (
+  authStore.currentUser?.systemRole === 'ADMIN'
+))
+
+const canCreateProject = computed(() => (
+  authStore.currentUser?.systemRole === 'ADMIN'
+  || authStore.currentUser?.systemRole === 'USER'
+))
 
 const hasActiveFilters = computed(() => {
   const current = appliedFilters.value
@@ -222,6 +249,59 @@ function formatDateRange(project: Project): string {
   return `${project.startDate ?? '未设置'} 至 ${project.endDate ?? '未设置'}`
 }
 
+async function loadOwnerOptions(): Promise<void> {
+  if (!isAdmin.value) return
+
+  const result = await getUsers({
+    systemRole: 'USER',
+    active: true,
+    page: 0,
+    size: 100,
+    sort: 'username,asc',
+  })
+
+  ownerOptions.value = [...result.items]
+}
+
+async function openCreateDialog(): Promise<void> {
+  if (isAdmin.value) {
+    await loadOwnerOptions()
+  }
+
+  createDialogVisible.value = true
+}
+
+async function handleCreateProject(
+  payload: CreateProjectRequest,
+): Promise<void> {
+  formSubmitting.value = true
+
+  try {
+    const created = await createProject(payload)
+    createDialogVisible.value = false
+    ElMessage.success('项目已创建')
+    await loadProjects()
+    await router.push({
+      name: 'project-detail',
+      params: { projectId: created.id },
+    })
+  } catch (error) {
+    ElMessage.error(getApiErrorMessage(
+      error,
+      '项目创建失败，请稍后重试',
+    ))
+  } finally {
+    formSubmitting.value = false
+  }
+}
+
+function goToProject(projectId: string): void {
+  void router.push({
+    name: 'project-detail',
+    params: { projectId },
+  })
+}
+
 onMounted(() => {
   void loadProjects()
 })
@@ -237,16 +317,26 @@ onMounted(() => {
         </p>
       </div>
 
-      <el-button
-        :loading="loading"
-        @click="loadProjects"
-      >
-        刷新
-      </el-button>
+      <div class="header-actions">
+        <el-button
+          :loading="loading"
+          @click="loadProjects"
+        >
+          刷新
+        </el-button>
+        <el-button
+          v-if="canCreateProject"
+          type="primary"
+          @click="openCreateDialog"
+        >
+          创建项目
+        </el-button>
+      </div>
     </header>
 
     <section class="filter-panel">
       <el-form
+        class="filter-form"
         :inline="true"
         :model="filters"
         @submit.prevent="handleSearch"
@@ -290,7 +380,7 @@ onMounted(() => {
           </el-select>
         </el-form-item>
 
-        <el-form-item>
+        <el-form-item class="filter-actions">
           <el-button
             native-type="submit"
             type="primary"
@@ -352,8 +442,17 @@ onMounted(() => {
           <el-table-column
             label="项目名称"
             min-width="180"
-            prop="name"
-          />
+          >
+            <template #default="{ row }">
+              <el-button
+                link
+                type="primary"
+                @click="goToProject((row as Project).id)"
+              >
+                {{ (row as Project).name }}
+              </el-button>
+            </template>
+          </el-table-column>
 
           <el-table-column
             label="Owner"
@@ -407,7 +506,7 @@ onMounted(() => {
             </template>
           </el-table-column>
 
-          <el-table-column label="归档" width="90">
+          <el-table-column label="归档" width="120">
             <template #default="{ row }">
               <el-tag
                 v-if="row.archivedAt"
@@ -418,6 +517,22 @@ onMounted(() => {
               </el-tag>
 
               <span v-else class="muted">否</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column
+            fixed="right"
+            label="操作"
+            width="100"
+          >
+            <template #default="{ row }">
+              <el-button
+                link
+                type="primary"
+                @click="goToProject((row as Project).id)"
+              >
+                查看
+              </el-button>
             </template>
           </el-table-column>
 
@@ -452,6 +567,15 @@ onMounted(() => {
         />
       </template>
     </section>
+
+    <ProjectFormDialog
+      v-model:visible="createDialogVisible"
+      mode="create"
+      :owner-options="ownerOptions"
+      :require-owner-id="isAdmin"
+      :submitting="formSubmitting"
+      @submit-create="handleCreateProject"
+    />
   </section>
 </template>
 
@@ -479,6 +603,11 @@ onMounted(() => {
   color: var(--fs-color-text-secondary, #64748b);
 }
 
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .filter-panel,
 .content-panel {
   border: 1px solid var(--fs-color-border, #dbe3ee);
@@ -488,6 +617,17 @@ onMounted(() => {
 
 .filter-panel {
   padding: 16px 16px 0;
+}
+
+.filter-form {
+  display: flex;
+  width: 100%;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.filter-form :deep(.filter-actions) {
+  margin-left: auto;
 }
 
 .content-panel {
