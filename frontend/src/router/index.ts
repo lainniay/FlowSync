@@ -11,6 +11,10 @@ import {
 import type { SystemRole } from '@/shared/api/types'
 import { useAuthStore } from '@/stores/auth'
 
+import { adminRoutes } from './routes/admin'
+import { invitationRoutes } from './routes/invitations'
+import { overviewRoutes } from './routes/overview'
+import { profileRoutes } from './routes/profile'
 import { projectRoutes } from './routes/projects'
 
 const router = createRouter({
@@ -37,12 +41,11 @@ const router = createRouter({
             name: 'overview',
           },
         },
-        {
-          path: 'overview',
-          name: 'overview',
-          component: () => import('@/views/HomeView.vue'),
-        },
+        ...overviewRoutes,
         ...projectRoutes,
+        ...profileRoutes,
+        ...adminRoutes,
+        ...invitationRoutes,
         {
           path: '403',
           name: 'forbidden',

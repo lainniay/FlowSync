@@ -8,7 +8,30 @@ import { getProjects } from '@/views/projects/api'
 import ProjectListView from '@/views/projects/ProjectListView.vue'
 
 vi.mock('@/views/projects/api', () => ({
+  createProject: vi.fn<typeof import('@/views/projects/api').createProject>(),
   getProjects: vi.fn<typeof getProjects>(),
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    currentUser: {
+      id: '2',
+      username: 'zhangsan',
+      displayName: '张三',
+      systemRole: 'USER',
+      active: true,
+    },
+  }),
+}))
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({
+    push: vi.fn<(path: unknown) => Promise<void>>(),
+  }),
+}))
+
+vi.mock('@/views/admin/api', () => ({
+  getUsers: vi.fn<typeof import('@/views/admin/api').getUsers>(),
 }))
 
 const project = {
