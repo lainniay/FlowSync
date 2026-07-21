@@ -11,7 +11,10 @@ import {
 import type { SystemRole } from '@/shared/api/types'
 import { useAuthStore } from '@/stores/auth'
 
+import { aiRoutes } from './routes/ai'
 import { projectRoutes } from './routes/projects'
+import { summaryRoutes } from './routes/summaries'
+import { taskRoutes } from './routes/tasks'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -43,6 +46,9 @@ const router = createRouter({
           component: () => import('@/views/HomeView.vue'),
         },
         ...projectRoutes,
+        ...taskRoutes,
+        ...summaryRoutes,
+        ...aiRoutes,
         {
           path: '403',
           name: 'forbidden',
