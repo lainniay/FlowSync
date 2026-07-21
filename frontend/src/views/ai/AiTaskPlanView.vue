@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ElAlert,
@@ -29,6 +29,7 @@ import 'element-plus/es/components/table-column/style/css'
 
 import { getApiErrorMessage } from '@/shared/api/errors'
 import { useAuthStore } from '@/stores/auth'
+import { getProject } from '@/views/projects/api'
 
 import {
   generateTaskPlan,
@@ -44,12 +45,57 @@ const projectId = computed(() => route.params.projectId as string)
 
 // --- Permission ---
 const isAdmin = computed(() => authStore.currentUser?.systemRole === 'ADMIN')
+const isProjectOwner = ref(false)
+const projectLoading = ref(false)
 
 // --- Step state ---
-type Step = 'input' | 'generating' | 'editing' | 'importing' | 'imported' | 'error'
+type Step =
+  | 'loading'
+  | 'input'
+  | 'generating'
+  | 'editing'
+  | 'importing'
+  | 'imported'
+  | 'forbidden'
+  | 'error'
 
-const step = ref<Step>('input')
+const step = ref<Step>('loading')
 const errorMessage = ref('')
+
+// --- Load project & verify owner ---
+async function verifyProjectOwner(): Promise<void> {
+  projectLoading.value = true
+  errorMessage.value = ''
+
+  if (isAdmin.value) {
+    step.value = 'forbidden'
+    errorMessage.value = '管理员不参与项目内容操作，不能使用 AI 任务计划。'
+    projectLoading.value = false
+    return
+  }
+
+  try {
+    const project = await getProject(projectId.value)
+    isProjectOwner.value =
+      project.owner.id === authStore.currentUser?.id
+
+    if (!isProjectOwner.value) {
+      step.value = 'forbidden'
+      errorMessage.value = '只有项目 owner 才能使用 AI 任务计划。'
+    } else {
+      step.value = 'input'
+    }
+  } catch {
+    step.value = 'error'
+    errorMessage.value = '加载项目信息失败，请稍后重试。'
+  } finally {
+    projectLoading.value = false
+  }
+}
+
+onMounted(() => {
+  void verifyProjectOwner()
+})
 
 // --- Input form ---
 const goal = ref('')
@@ -126,9 +172,26 @@ function handleRemoveItem(draftId: string): void {
     ElMessage.warning('至少保留一个条目')
     return
   }
-  draftItems.value = draftItems.value.filter(
-    (item) => item.draftId !== draftId,
-  )
+  // Clear parentDraftId for children referencing the removed item
+  draftItems.value = draftItems.value
+    .map((item) =>
+      item.parentDraftId === draftId
+        ? { ...item, parentDraftId: null }
+        : item,
+    )
+    .filter((item) => item.draftId !== draftId)
+}
+
+function handleMoveUp(index: number): void {
+  if (index <= 0) return
+  const items = draftItems.value
+  ;[items[index - 1], items[index]] = [items[index]!, items[index - 1]!]
+}
+
+function handleMoveDown(index: number): void {
+  if (index >= draftItems.value.length - 1) return
+  const items = draftItems.value
+  ;[items[index], items[index + 1]] = [items[index + 1]!, items[index]!]
 }
 
 function handleRegenerate(): void {
@@ -194,7 +257,7 @@ async function handleImport(): Promise<void> {
     const result = await importTaskPlan(projectId.value, {
       items: draftItems.value.map((item) => ({
         draftId: item.draftId,
-        parentDraftId: item.parentDraftId,
+        parentDraftId: item.parentDraftId ?? null,
         title: item.title.trim(),
         description: item.description || null,
         priority: item.priority,
@@ -224,12 +287,6 @@ async function handleImport(): Promise<void> {
 function handleBackToTasks(): void {
   router.push({ name: 'tasks', query: { projectId: projectId.value } })
 }
-
-// --- Deny ADMIN ---
-if (isAdmin.value) {
-  step.value = 'error'
-  errorMessage.value = '管理员不参与项目内容操作，不能生成 AI 任务计划。'
-}
 </script>
 
 <template>
@@ -242,6 +299,34 @@ if (isAdmin.value) {
         </p>
       </div>
     </header>
+
+    <!-- Step: Loading -->
+    <section
+      v-if="step === 'loading'"
+      class="content-panel"
+    >
+      <el-skeleton animated :rows="6" />
+    </section>
+
+    <!-- Step: Forbidden -->
+    <section
+      v-if="step === 'forbidden'"
+      class="content-panel"
+    >
+      <div class="feedback-state">
+        <el-alert
+          :closable="false"
+          :title="errorMessage"
+          type="warning"
+          show-icon
+        />
+        <router-link
+          :to="{ name: 'tasks' }"
+        >
+          返回任务列表
+        </router-link>
+      </div>
+    </section>
 
     <!-- Step: Input -->
     <section
@@ -393,6 +478,27 @@ if (isAdmin.value) {
           </template>
         </el-table-column>
 
+        <el-table-column label="排序" width="110">
+          <template #default="{ $index }">
+            <el-button
+              size="small"
+              text
+              :disabled="$index === 0"
+              @click="handleMoveUp($index)"
+            >
+              上移
+            </el-button>
+            <el-button
+              size="small"
+              text
+              :disabled="$index === draftItems.length - 1"
+              @click="handleMoveDown($index)"
+            >
+              下移
+            </el-button>
+          </template>
+        </el-table-column>
+
         <el-table-column label="操作" width="80">
           <template #default="{ row }">
             <el-button
@@ -459,9 +565,8 @@ if (isAdmin.value) {
         />
         <div class="error-actions">
           <el-button
-            v-if="!isAdmin && step === 'error'"
             type="primary"
-            @click="step = 'input'"
+            @click="verifyProjectOwner"
           >
             重新开始
           </el-button>
