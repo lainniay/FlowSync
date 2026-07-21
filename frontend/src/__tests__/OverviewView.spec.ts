@@ -117,6 +117,30 @@ describe('OverviewView', () => {
     expect(alert.attributes('title')).toContain('项目筛选项加载失败')
   })
 
+  it('retries project options when refresh is clicked', async () => {
+    vi.mocked(getProjects)
+      .mockRejectedValueOnce(new Error('options failed'))
+      .mockResolvedValueOnce({
+        items: [],
+        page: 0,
+        size: 100,
+        totalElements: 0,
+        totalPages: 0,
+      })
+    vi.mocked(getOverview).mockResolvedValue(overview)
+
+    const wrapper = shallowMount(OverviewView)
+
+    await flushPromises()
+
+    expect(getProjects).toHaveBeenCalledTimes(1)
+
+    await wrapper.get('el-button-stub').trigger('click')
+    await flushPromises()
+
+    expect(getProjects).toHaveBeenCalledTimes(2)
+  })
+
   it('loads all project option pages', async () => {
     vi.mocked(getProjects)
       .mockResolvedValueOnce({

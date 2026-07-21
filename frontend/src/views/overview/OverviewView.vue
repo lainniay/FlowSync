@@ -191,6 +191,13 @@ async function loadOverview(): Promise<void> {
   }
 }
 
+async function handleRefresh(): Promise<void> {
+  await Promise.all([
+    loadProjectOptions(),
+    loadOverview(),
+  ])
+}
+
 async function handleResetFilter(): Promise<void> {
   selectedProjectId.value = ''
   await loadOverview()
@@ -223,7 +230,7 @@ onMounted(() => {
 
       <el-button
         :loading="loading"
-        @click="loadOverview"
+        @click="handleRefresh"
       >
         刷新
       </el-button>
