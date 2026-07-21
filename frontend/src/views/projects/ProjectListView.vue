@@ -38,6 +38,7 @@ import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
 
 import { getApiErrorMessage } from '@/shared/api/errors'
+import { fetchAllPages } from '@/shared/api/pagination'
 import type {
   Priority,
   ProjectStatus,
@@ -252,15 +253,13 @@ function formatDateRange(project: Project): string {
 async function loadOwnerOptions(): Promise<void> {
   if (!isAdmin.value) return
 
-  const result = await getUsers({
+  const users = await fetchAllPages(getUsers, {
     systemRole: 'USER',
     active: true,
-    page: 0,
-    size: 100,
     sort: 'username,asc',
   })
 
-  ownerOptions.value = [...result.items]
+  ownerOptions.value = [...users]
 }
 
 async function openCreateDialog(): Promise<void> {

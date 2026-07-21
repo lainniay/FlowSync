@@ -39,6 +39,7 @@ import 'element-plus/es/components/skeleton/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 
+import { fetchAllPages } from '@/shared/api/pagination'
 import { getApiErrorMessage } from '@/shared/api/errors'
 import { getUsers } from '@/views/admin/api'
 
@@ -204,15 +205,13 @@ async function openAddDialog(): Promise<void> {
     const memberIds = new Set(
       members.value.map((member) => member.user.id),
     )
-    const result = await getUsers({
+    const result = await fetchAllPages(getUsers, {
       systemRole: 'USER',
       active: true,
-      page: 0,
-      size: 100,
       sort: 'username,asc',
     })
 
-    addUserOptions.value = result.items
+    addUserOptions.value = result
       .filter((user) => !memberIds.has(user.id))
       .map((user) => ({
         id: user.id,

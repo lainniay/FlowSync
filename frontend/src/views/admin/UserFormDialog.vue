@@ -29,6 +29,7 @@ import type {
   CreateUserRequest,
   UpdateUserRequest,
 } from './types'
+import { getUsernameValidationError } from './validation'
 
 type DialogMode = 'create' | 'edit'
 
@@ -108,8 +109,10 @@ function validateUsername(
   value: string,
   callback: (error?: Error) => void,
 ): void {
-  if (!/^[A-Za-z0-9._-]{3,50}$/.test(value)) {
-    callback(new Error('用户名只能包含字母、数字、点、下划线和连字符，长度 3 到 50'))
+  const message = getUsernameValidationError(value)
+
+  if (message) {
+    callback(new Error(message))
     return
   }
 
@@ -251,7 +254,7 @@ watch(
         <el-input
           v-model="createForm.username"
           maxlength="50"
-          placeholder="3 到 50 个字符"
+          placeholder="1 到 50 个字符"
         />
       </el-form-item>
 

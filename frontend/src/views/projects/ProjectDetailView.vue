@@ -39,6 +39,7 @@ import 'element-plus/es/components/tab-pane/style/css'
 import 'element-plus/es/components/tabs/style/css'
 import 'element-plus/es/components/tag/style/css'
 
+import { fetchAllPages } from '@/shared/api/pagination'
 import { getApiErrorMessage } from '@/shared/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { getUsers } from '@/views/admin/api'
@@ -167,6 +168,10 @@ const canCreateInvitations = computed(() => (
 
 const canCancelInvitations = computed(() => canWrite.value)
 
+const canViewInvitations = computed(() => (
+  isOwner.value || isAdmin.value
+))
+
 const transferRules: FormRules<{ ownerId: string }> = {
   ownerId: [
     { required: true, message: '请选择新的 owner', trigger: 'change' },
@@ -194,10 +199,15 @@ async function loadProject(): Promise<void> {
 }
 
 async function reloadPanels(): Promise<void> {
-  await Promise.all([
+  const reloadTasks = [
     membersPanelRef.value?.reload(),
-    invitationsPanelRef.value?.reload(),
-  ])
+  ]
+
+  if (canViewInvitations.value) {
+    reloadTasks.push(invitationsPanelRef.value?.reload())
+  }
+
+  await Promise.all(reloadTasks)
 }
 
 async function handleEditProject(
@@ -310,15 +320,13 @@ async function openTransferDialog(): Promise<void> {
     const currentOwnerId = project.value.owner.id
 
     if (isAdmin.value) {
-      const result = await getUsers({
+      const users = await fetchAllPages(getUsers, {
         systemRole: 'USER',
         active: true,
-        page: 0,
-        size: 100,
         sort: 'username,asc',
       })
 
-      transferOwnerOptions.value = result.items
+      transferOwnerOptions.value = users
         .filter((user) => user.id !== currentOwnerId)
         .map((user) => ({
           id: user.id,
@@ -389,6 +397,10 @@ function formatDateRange(current: Project): string {
 function formatDateTime(value: string | null): string {
   if (!value) return '—'
   return value.replace('T', ' ').slice(0, 16)
+}
+
+function goBack(): void {
+  void router.push({ name: 'projects' })
 }
 
 watch(projectId, () => {
@@ -569,7 +581,12 @@ onMounted(() => {
             />
           </el-tab-pane>
 
-          <el-tab-pane label="邀请" name="invitations">
+          <el-tab-pane
+            v-if="canViewInvitations"
+            data-testid="project-invitations-tab"
+            label="邀请"
+            name="invitations"
+          >
             <ProjectInvitationsPanel
               ref="invitationsPanelRef"
               :can-cancel-invitations="canCancelInvitations"
@@ -662,6 +679,16 @@ onMounted(() => {
         </el-button>
       </template>
     </el-dialog>
+
+    <footer class="page-footer">
+      <el-button
+        class="back-button"
+        type="primary"
+        @click="goBack"
+      >
+        返回
+      </el-button>
+    </footer>
   </section>
 </template>
 
@@ -707,6 +734,17 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.page-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.back-button {
+  height: 43px;
+  padding: 0 20px;
+  font-size: 19px;
 }
 
 .content-panel {

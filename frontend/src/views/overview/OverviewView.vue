@@ -42,6 +42,7 @@ import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
 
 import { getApiErrorMessage } from '@/shared/api/errors'
+import { fetchAllPages } from '@/shared/api/pagination'
 import type { TaskStatus } from '@/shared/api/types'
 import { useAuthStore } from '@/stores/auth'
 import { getProjects } from '@/views/projects/api'
@@ -82,6 +83,7 @@ const authStore = useAuthStore()
 
 const overview = ref<Overview | null>(null)
 const projectOptions = ref<Project[]>([])
+const projectOptionsError = ref('')
 const selectedProjectId = ref('')
 const loading = ref(false)
 const loaded = ref(false)
@@ -153,14 +155,20 @@ const statCards = computed((): StatCard[] => {
 })
 
 async function loadProjectOptions(): Promise<void> {
-  const result = await getProjects({
-    archived: false,
-    page: 0,
-    size: 100,
-    sort: 'name,asc',
-  })
+  projectOptionsError.value = ''
 
-  projectOptions.value = [...result.items]
+  try {
+    projectOptions.value = [...await fetchAllPages(getProjects, {
+      archived: false,
+      sort: 'name,asc',
+    })]
+  } catch (error) {
+    projectOptions.value = []
+    projectOptionsError.value = getApiErrorMessage(
+      error,
+      '项目筛选项加载失败',
+    )
+  }
 }
 
 async function loadOverview(): Promise<void> {
@@ -196,9 +204,9 @@ watch(selectedProjectId, () => {
   void loadOverview()
 })
 
-onMounted(async () => {
-  await loadProjectOptions()
-  await loadOverview()
+onMounted(() => {
+  void loadProjectOptions()
+  void loadOverview()
 })
 </script>
 
@@ -222,6 +230,15 @@ onMounted(async () => {
     </header>
 
     <section class="filter-panel">
+      <el-alert
+        v-if="projectOptionsError"
+        :closable="false"
+        :title="projectOptionsError"
+        class="project-options-alert"
+        show-icon
+        type="warning"
+      />
+
       <el-form :inline="true">
         <el-form-item label="项目筛选">
           <el-select
@@ -390,6 +407,10 @@ onMounted(async () => {
 
 .filter-panel {
   padding: 16px 16px 0;
+}
+
+.project-options-alert {
+  margin-bottom: 12px;
 }
 
 .content-panel {
