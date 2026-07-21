@@ -1,5 +1,7 @@
 package hgc.flowsync.user;
 
+import java.util.TreeSet;
+
 import hgc.flowsync.common.api.PageResponse;
 import hgc.flowsync.common.error.BusinessException;
 import hgc.flowsync.common.error.ErrorCode;
@@ -26,6 +28,7 @@ public class UserService {
 	private final ProjectMemberMapper projectMemberMapper;
 	private final ProjectInvitationMapper projectInvitationMapper;
 	private final TaskMapper taskMapper;
+	private final UserWriteLockService userWriteLockService;
 
 	public UserService(
 		UserMapper userMapper,
@@ -34,7 +37,8 @@ public class UserService {
 		ProjectMapper projectMapper,
 		ProjectMemberMapper projectMemberMapper,
 		ProjectInvitationMapper projectInvitationMapper,
-		TaskMapper taskMapper) {
+		TaskMapper taskMapper,
+		UserWriteLockService userWriteLockService) {
 		this.userMapper = userMapper;
 		this.passwordEncoder = passwordEncoder;
 		this.sessionRegistry = sessionRegistry;
@@ -42,6 +46,7 @@ public class UserService {
 		this.projectMemberMapper = projectMemberMapper;
 		this.projectInvitationMapper = projectInvitationMapper;
 		this.taskMapper = taskMapper;
+		this.userWriteLockService = userWriteLockService;
 	}
 
 	public UserResponse findById(Long userId) {
@@ -86,6 +91,9 @@ public class UserService {
 		SystemRole systemRole,
 		String phone,
 		String email) {
+		if (systemRole == SystemRole.ADMIN) {
+			userWriteLockService.lockAdminRoleChanges();
+		}
 		if (userMapper.selectCount(Wrappers.<User>lambdaQuery()
 			.eq(User::getUsername, username)) > 0) {
 			throw new BusinessException(ErrorCode.USERNAME_ALREADY_EXISTS);
@@ -125,35 +133,49 @@ public class UserService {
 		String email,
 		SystemRole systemRole,
 		boolean active) {
-		var activeAdmins = userMapper.selectList(Wrappers.<User>lambdaQuery()
+		userWriteLockService.lockAdminRoleChanges();
+		var userIds = new TreeSet<>(userMapper.selectList(Wrappers.<User>lambdaQuery()
 			.select(User::getId)
 			.eq(User::getSystemRole, SystemRole.ADMIN)
-			.eq(User::isActive, true)
-			.orderByAsc(User::getId)
-			.last("FOR UPDATE"));
-		User user = userMapper.selectOne(Wrappers.<User>lambdaQuery()
-			.eq(User::getId, userId)
-			.last("FOR UPDATE"));
+			.eq(User::isActive, true)).stream().map(User::getId).toList());
+		userIds.add(userId);
+		return updateLocked(userId, displayName, phone, email, systemRole, active, userIds);
+	}
+
+	private UserResponse updateLocked(
+		Long userId,
+		String displayName,
+		String phone,
+		String email,
+		SystemRole systemRole,
+		boolean active,
+		TreeSet<Long> userIds) {
+		var lockedUsers = userWriteLockService.lockUsersById(userIds);
+		User user = lockedUsers.get(userId);
 		if (user == null) {
 			throw new BusinessException(ErrorCode.NOT_FOUND);
 		}
+		long activeAdminCount = lockedUsers.values().stream()
+			.filter(candidate -> candidate.isActive()
+				&& candidate.getSystemRole() == SystemRole.ADMIN)
+			.count();
 
 		boolean removesActiveAdmin = user.isActive()
 			&& user.getSystemRole() == SystemRole.ADMIN
 			&& (!active || systemRole != SystemRole.ADMIN);
-		if (removesActiveAdmin && activeAdmins.size() == 1) {
+		if (removesActiveAdmin && activeAdminCount == 1) {
 			throw new BusinessException(ErrorCode.LAST_ADMIN_REQUIRED);
 		}
 		if (user.getSystemRole() == SystemRole.USER && systemRole == SystemRole.ADMIN
-			&& (projectMemberMapper.existsByUserId(userId)
-				|| projectInvitationMapper.existsPendingByInviteeId(userId))) {
+			&& (projectMemberMapper.existsByUserIdForUpdate(userId)
+				|| projectInvitationMapper.existsPendingByInviteeIdForUpdate(userId))) {
 			throw new BusinessException(ErrorCode.USER_HAS_PROJECT_MEMBERSHIP);
 		}
 		if (user.isActive() && !active) {
-			if (projectMapper.existsByOwnerId(userId)) {
+			if (projectMapper.existsByOwnerIdForUpdate(userId)) {
 				throw new BusinessException(ErrorCode.USER_OWNS_PROJECT);
 			}
-			if (taskMapper.existsIncompleteByAssigneeId(userId)) {
+			if (taskMapper.existsIncompleteByAssigneeIdForUpdate(userId)) {
 				throw new BusinessException(ErrorCode.USER_HAS_ACTIVE_TASKS);
 			}
 		}

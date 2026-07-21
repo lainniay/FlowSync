@@ -1105,7 +1105,7 @@ owner 或该日志创建者可以删除，成功返回 `204`。
   ],
   "recentActivities": [
     {
-      "type": "TASK_LOG_CREATED",
+      "type": "TASK_PROGRESS_ADDED",
       "resourceId": "601",
       "summary": "李明更新了任务进度",
       "occurredAt": "2026-07-13T08:30:00Z"

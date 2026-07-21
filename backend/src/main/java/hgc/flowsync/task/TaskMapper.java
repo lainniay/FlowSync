@@ -11,6 +11,12 @@ import org.apache.ibatis.annotations.Select;
 @Mapper
 public interface TaskMapper extends BaseMapper<Task> {
 
+	default Task selectByIdForUpdate(Long taskId) {
+		return taskId == null ? null : selectOne(Wrappers.<Task>lambdaQuery()
+			.eq(Task::getId, taskId)
+			.last("FOR UPDATE"));
+	}
+
 	@Select({
 		"<script>",
 		"SELECT task_id AS taskId, progress_percent AS progressPercent FROM (",
@@ -55,6 +61,14 @@ public interface TaskMapper extends BaseMapper<Task> {
 		return selectCount(Wrappers.<Task>lambdaQuery()
 			.eq(Task::getAssigneeId, assigneeId)
 			.notIn(Task::getStatus, TaskStatus.COMPLETED, TaskStatus.CANCELLED)) > 0;
+	}
+
+	default boolean existsIncompleteByAssigneeIdForUpdate(Long assigneeId) {
+		return !selectList(Wrappers.<Task>lambdaQuery()
+			.select(Task::getId)
+			.eq(Task::getAssigneeId, assigneeId)
+			.notIn(Task::getStatus, TaskStatus.COMPLETED, TaskStatus.CANCELLED)
+			.last("LIMIT 1 FOR UPDATE")).isEmpty();
 	}
 
 	default boolean existsIncompleteByProjectIdAndAssigneeId(Long projectId, Long assigneeId) {

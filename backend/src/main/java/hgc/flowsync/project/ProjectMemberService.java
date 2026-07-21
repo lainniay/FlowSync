@@ -1,6 +1,7 @@
 package hgc.flowsync.project;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -13,8 +14,8 @@ import hgc.flowsync.user.CurrentUserService;
 import hgc.flowsync.user.SystemRole;
 import hgc.flowsync.user.User;
 import hgc.flowsync.user.UserMapper;
+import hgc.flowsync.user.UserWriteLockService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -29,6 +30,7 @@ public class ProjectMemberService {
 	private final UserMapper userMapper;
 	private final CurrentUserService currentUserService;
 	private final ProjectAccessService projectAccessService;
+	private final UserWriteLockService userWriteLockService;
 
 	public ProjectMemberService(
 		ProjectMemberMapper projectMemberMapper,
@@ -36,13 +38,15 @@ public class ProjectMemberService {
 		TaskMapper taskMapper,
 		UserMapper userMapper,
 		CurrentUserService currentUserService,
-		ProjectAccessService projectAccessService) {
+		ProjectAccessService projectAccessService,
+		UserWriteLockService userWriteLockService) {
 		this.projectMemberMapper = projectMemberMapper;
 		this.projectInvitationMapper = projectInvitationMapper;
 		this.taskMapper = taskMapper;
 		this.userMapper = userMapper;
 		this.currentUserService = currentUserService;
 		this.projectAccessService = projectAccessService;
+		this.userWriteLockService = userWriteLockService;
 	}
 
 	@Transactional(readOnly = true)
@@ -62,30 +66,44 @@ public class ProjectMemberService {
 		Authentication authentication,
 		Long projectId,
 		List<String> requestedUserIds) {
-		User currentUser = currentUserService.requireForUpdate(authentication);
+		List<Long> userIds = parseDistinctIds(requestedUserIds);
+		User requestedBy = currentUserService.require(authentication);
+		UserWriteLockService.LockedUsers lockedUsers = userWriteLockService.lockUsers(
+			requestedBy, userIds.toArray(Long[]::new));
+		User currentUser = lockedUsers.currentUser();
 		if (!projectAccessService.isAdmin(currentUser)) {
 			throw new BusinessException(ErrorCode.FORBIDDEN);
 		}
 		Project project = projectAccessService.requireProjectForUpdate(projectId);
 		projectAccessService.requireUnarchived(project);
 
-		List<Long> userIds = parseDistinctIds(requestedUserIds);
-		Map<Long, User> users = users(userIds);
-		for (Long userId : userIds) {
+		Map<Long, User> users = new HashMap<>();
+		userIds.forEach(userId -> users.put(userId, lockedUsers.user(userId)));
+		for (int index = 0; index < userIds.size(); index++) {
+			Long userId = userIds.get(index);
 			User user = users.get(userId);
-			if (!user.isActive() || user.getSystemRole() != SystemRole.USER) {
-				throw new BusinessException(ErrorCode.VALIDATION_ERROR);
+			String field = userIdField(index);
+			if (user == null) {
+				throw new BusinessException(ErrorCode.NOT_FOUND, field);
 			}
-			if (projectMemberMapper.existsByProjectIdAndUserId(projectId, userId)) {
-				throw new BusinessException(ErrorCode.MEMBER_ALREADY_EXISTS);
+			if (!user.isActive() || user.getSystemRole() != SystemRole.USER) {
+				throw new BusinessException(ErrorCode.VALIDATION_ERROR, field);
+			}
+			if (projectMemberMapper.existsByProjectIdAndUserIdForUpdate(projectId, userId)) {
+				throw new BusinessException(ErrorCode.MEMBER_ALREADY_EXISTS, field);
 			}
 		}
 
-		try {
-			return userIds.stream().map(userId -> add(projectId, users.get(userId))).toList();
-		} catch (DuplicateKeyException exception) {
-			throw new BusinessException(ErrorCode.MEMBER_ALREADY_EXISTS);
+		List<ProjectMemberResponse> members = new ArrayList<>(userIds.size());
+		for (int index = 0; index < userIds.size(); index++) {
+			Long userId = userIds.get(index);
+			try {
+				members.add(add(projectId, users.get(userId)));
+			} catch (DuplicateKeyException exception) {
+				throw new BusinessException(ErrorCode.MEMBER_ALREADY_EXISTS, userIdField(index));
+			}
 		}
+		return List.copyOf(members);
 	}
 
 	@Transactional
@@ -103,13 +121,9 @@ public class ProjectMemberService {
 		if (taskMapper.existsIncompleteByProjectIdAndAssigneeId(projectId, userId)) {
 			throw new BusinessException(ErrorCode.MEMBER_HAS_ACTIVE_TASKS);
 		}
-		try {
-			projectMemberMapper.delete(Wrappers.<ProjectMember>lambdaQuery()
-				.eq(ProjectMember::getProjectId, projectId)
-				.eq(ProjectMember::getUserId, userId));
-		} catch (DataIntegrityViolationException exception) {
-			throw new BusinessException(ErrorCode.RESOURCE_IN_USE);
-		}
+		projectMemberMapper.delete(Wrappers.<ProjectMember>lambdaQuery()
+			.eq(ProjectMember::getProjectId, projectId)
+			.eq(ProjectMember::getUserId, userId));
 	}
 
 	private ProjectMemberResponse add(Long projectId, User user) {
@@ -128,22 +142,20 @@ public class ProjectMemberService {
 		return ProjectMemberResponse.from(projectMemberMapper.selectById(member.getId()), user);
 	}
 
-	private Map<Long, User> users(List<Long> userIds) {
-		Map<Long, User> users = new HashMap<>();
-		userMapper.selectList(Wrappers.<User>lambdaQuery()
-			.in(User::getId, userIds)
-			.last("FOR UPDATE")).forEach(user -> users.put(user.getId(), user));
-		if (users.size() != userIds.size()) {
-			throw new BusinessException(ErrorCode.NOT_FOUND);
+	private static List<Long> parseDistinctIds(List<String> requestedUserIds) {
+		List<Long> userIds = new ArrayList<>(requestedUserIds.size());
+		HashSet<Long> seen = new HashSet<>();
+		for (int index = 0; index < requestedUserIds.size(); index++) {
+			Long userId = Long.parseLong(requestedUserIds.get(index));
+			if (!seen.add(userId)) {
+				throw new BusinessException(ErrorCode.VALIDATION_ERROR, userIdField(index));
+			}
+			userIds.add(userId);
 		}
-		return users;
+		return List.copyOf(userIds);
 	}
 
-	private static List<Long> parseDistinctIds(List<String> requestedUserIds) {
-		List<Long> userIds = requestedUserIds.stream().map(Long::parseLong).toList();
-		if (new HashSet<>(userIds).size() != userIds.size()) {
-			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
-		}
-		return userIds;
+	private static String userIdField(int index) {
+		return "userIds[" + index + "]";
 	}
 }

@@ -17,6 +17,7 @@ import hgc.flowsync.user.CurrentUserService;
 import hgc.flowsync.user.SystemRole;
 import hgc.flowsync.user.User;
 import hgc.flowsync.user.UserMapper;
+import hgc.flowsync.user.UserWriteLockService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -36,6 +37,7 @@ public class ProjectService {
 	private final UserMapper userMapper;
 	private final CurrentUserService currentUserService;
 	private final ProjectAccessService projectAccessService;
+	private final UserWriteLockService userWriteLockService;
 
 	public ProjectService(
 		ProjectMapper projectMapper,
@@ -46,7 +48,8 @@ public class ProjectService {
 		SummaryMapper summaryMapper,
 		UserMapper userMapper,
 		CurrentUserService currentUserService,
-		ProjectAccessService projectAccessService) {
+		ProjectAccessService projectAccessService,
+		UserWriteLockService userWriteLockService) {
 		this.projectMapper = projectMapper;
 		this.projectMemberMapper = projectMemberMapper;
 		this.projectInvitationMapper = projectInvitationMapper;
@@ -56,6 +59,7 @@ public class ProjectService {
 		this.userMapper = userMapper;
 		this.currentUserService = currentUserService;
 		this.projectAccessService = projectAccessService;
+		this.userWriteLockService = userWriteLockService;
 	}
 
 	@Transactional(readOnly = true)
@@ -116,12 +120,34 @@ public class ProjectService {
 		LocalDate startDate,
 		LocalDate endDate,
 		String requestedOwnerId) {
-		User currentUser = currentUserService.requireForUpdate(authentication);
 		if (startDate != null && endDate != null && endDate.isBefore(startDate)) {
 			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
 		}
 
-		User owner = owner(currentUser, requestedOwnerId);
+		User requestedBy = currentUserService.require(authentication);
+		Long requestedOwner = requestedOwnerId == null ? null : parseId(requestedOwnerId);
+		UserWriteLockService.LockedUsers lockedUsers =
+			userWriteLockService.lockUsers(requestedBy, requestedOwner);
+		User currentUser = lockedUsers.currentUser();
+		Long ownerId;
+		if (currentUser.getSystemRole() == SystemRole.USER) {
+			if (requestedOwnerId != null) {
+				throw new BusinessException(ErrorCode.VALIDATION_ERROR);
+			}
+			ownerId = currentUser.getId();
+		} else {
+			if (requestedOwner == null) {
+				throw new BusinessException(ErrorCode.VALIDATION_ERROR);
+			}
+			ownerId = requestedOwner;
+		}
+		User owner = lockedUsers.user(ownerId);
+		if (owner == null) {
+			throw new BusinessException(ErrorCode.NOT_FOUND);
+		}
+		if (!owner.isActive() || owner.getSystemRole() != SystemRole.USER) {
+			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
+		}
 		Project project = new Project();
 		project.setOwnerId(owner.getId());
 		project.setName(name);
@@ -154,6 +180,7 @@ public class ProjectService {
 		projectAccessService.requireOwnerOrAdmin(project, currentUser);
 		projectAccessService.requireUnarchived(project);
 		validateDateRange(startDate, endDate);
+		validateTaskDueDates(projectId, startDate, endDate);
 		projectMapper.update(null, Wrappers.<Project>lambdaUpdate()
 			.eq(Project::getId, projectId)
 			.set(Project::getName, name)
@@ -170,12 +197,22 @@ public class ProjectService {
 		Authentication authentication,
 		Long projectId,
 		String requestedOwnerId) {
-		User currentUser = currentUserService.requireForUpdate(authentication);
+		long newOwnerId = parseId(requestedOwnerId);
+		User requestedBy = currentUserService.require(authentication);
+		UserWriteLockService.LockedUsers lockedUsers =
+			userWriteLockService.lockUsers(requestedBy, newOwnerId);
+		User currentUser = lockedUsers.currentUser();
+		User newOwner = lockedUsers.user(newOwnerId);
+		if (newOwner == null) {
+			throw new BusinessException(ErrorCode.NOT_FOUND);
+		}
+		if (!newOwner.isActive() || newOwner.getSystemRole() != SystemRole.USER) {
+			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
+		}
 		Project project = projectAccessService.requireProjectForUpdate(projectId);
 		projectAccessService.requireOwnerOrAdmin(project, currentUser);
 		projectAccessService.requireUnarchived(project);
-		User newOwner = activeUserForUpdate(parseId(requestedOwnerId));
-		if (!projectMemberMapper.existsByProjectIdAndUserId(projectId, newOwner.getId())) {
+		if (!projectMemberMapper.existsByProjectIdAndUserIdForUpdate(projectId, newOwner.getId())) {
 			ProjectMember member = new ProjectMember();
 			member.setProjectId(projectId);
 			member.setUserId(newOwner.getId());
@@ -230,6 +267,9 @@ public class ProjectService {
 			if (!taskIds.isEmpty()) {
 				taskLogMapper.delete(Wrappers.<TaskLog>lambdaQuery()
 					.in(TaskLog::getTaskId, taskIds));
+				taskMapper.update(null, Wrappers.<Task>lambdaUpdate()
+					.in(Task::getId, taskIds)
+					.set(Task::getParentId, null));
 			}
 			taskMapper.delete(Wrappers.<Task>lambdaQuery()
 				.eq(Task::getProjectId, projectId));
@@ -241,39 +281,6 @@ public class ProjectService {
 		} catch (DataIntegrityViolationException exception) {
 			throw new BusinessException(ErrorCode.RESOURCE_IN_USE);
 		}
-	}
-
-	private User owner(User currentUser, String requestedOwnerId) {
-		if (currentUser.getSystemRole() == SystemRole.USER) {
-			if (requestedOwnerId != null) {
-				throw new BusinessException(ErrorCode.VALIDATION_ERROR);
-			}
-			return currentUser;
-		}
-		if (requestedOwnerId == null) {
-			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
-		}
-
-		long ownerId;
-		try {
-			ownerId = Long.parseLong(requestedOwnerId);
-		} catch (NumberFormatException exception) {
-			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
-		}
-		return activeUserForUpdate(ownerId);
-	}
-
-	private User activeUserForUpdate(long userId) {
-		User user = userMapper.selectOne(Wrappers.<User>lambdaQuery()
-			.eq(User::getId, userId)
-			.last("FOR UPDATE"));
-		if (user == null) {
-			throw new BusinessException(ErrorCode.NOT_FOUND);
-		}
-		if (!user.isActive() || user.getSystemRole() != SystemRole.USER) {
-			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
-		}
-		return user;
 	}
 
 	private void cancelPendingInvitation(Long projectId, Long inviteeId) {
@@ -306,6 +313,25 @@ public class ProjectService {
 
 	private static void validateDateRange(LocalDate startDate, LocalDate endDate) {
 		if (startDate != null && endDate != null && endDate.isBefore(startDate)) {
+			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
+		}
+	}
+
+	private void validateTaskDueDates(Long projectId, LocalDate startDate, LocalDate endDate) {
+		LambdaQueryWrapper<Task> query = Wrappers.<Task>lambdaQuery()
+			.eq(Task::getProjectId, projectId);
+		if (startDate != null && endDate != null) {
+			query.and(dates -> dates.lt(Task::getDueDate, startDate)
+				.or()
+				.gt(Task::getDueDate, endDate));
+		} else if (startDate != null) {
+			query.lt(Task::getDueDate, startDate);
+		} else if (endDate != null) {
+			query.gt(Task::getDueDate, endDate);
+		} else {
+			return;
+		}
+		if (taskMapper.selectCount(query) > 0) {
 			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
 		}
 	}

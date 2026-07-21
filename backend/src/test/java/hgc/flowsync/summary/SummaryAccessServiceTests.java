@@ -131,7 +131,7 @@ class SummaryAccessServiceTests {
 	void onlyCurrentUserMembersCanCreateAndAdminCannotWrite() {
 		when(projectAccessService.requireProjectForUpdate(PROJECT_ID)).thenReturn(project);
 		when(currentUserService.requireForUpdate(authentication)).thenReturn(member);
-		when(projectAccessService.isMember(project, member)).thenReturn(true);
+		when(projectAccessService.isMemberForUpdate(project, member)).thenReturn(true);
 		assertThat(summaryAccessService.requireCreatable(authentication, PROJECT_ID).currentUser())
 			.isSameAs(member);
 
@@ -143,7 +143,7 @@ class SummaryAccessServiceTests {
 
 		when(currentUserService.requireForUpdate(authentication)).thenReturn(outsider);
 		when(projectAccessService.isAdmin(outsider)).thenReturn(false);
-		when(projectAccessService.isMember(project, outsider)).thenReturn(false);
+		when(projectAccessService.isMemberForUpdate(project, outsider)).thenReturn(false);
 		assertBusinessError(
 			() -> summaryAccessService.requireCreatable(authentication, PROJECT_ID),
 			ErrorCode.NOT_FOUND);
@@ -152,18 +152,18 @@ class SummaryAccessServiceTests {
 	@Test
 	void creatorAndOwnerCanWriteButOtherVisibleMemberCannot() {
 		stubWrite(creator);
-		when(projectAccessService.isMember(project, creator)).thenReturn(true);
+		when(projectAccessService.isMemberForUpdate(project, creator)).thenReturn(true);
 		assertThat(summaryAccessService.requireWritable(authentication, SUMMARY_ID).summary())
 			.isSameAs(summary);
 
 		when(currentUserService.requireForUpdate(authentication)).thenReturn(owner);
-		when(projectAccessService.isMember(project, owner)).thenReturn(true);
+		when(projectAccessService.isMemberForUpdate(project, owner)).thenReturn(true);
 		when(projectAccessService.isOwner(project, owner)).thenReturn(true);
 		assertThatCode(() -> summaryAccessService.requireWritable(authentication, SUMMARY_ID))
 			.doesNotThrowAnyException();
 
 		when(currentUserService.requireForUpdate(authentication)).thenReturn(member);
-		when(projectAccessService.isMember(project, member)).thenReturn(true);
+		when(projectAccessService.isMemberForUpdate(project, member)).thenReturn(true);
 		when(projectAccessService.isOwner(project, member)).thenReturn(false);
 		assertBusinessError(
 			() -> summaryAccessService.requireWritable(authentication, SUMMARY_ID),
@@ -174,13 +174,13 @@ class SummaryAccessServiceTests {
 	void removedCreatorAndOutsiderAreHiddenBeforeArchiveStateIsChecked() {
 		project.setArchivedAt(LocalDateTime.now());
 		stubWrite(creator);
-		when(projectAccessService.isMember(project, creator)).thenReturn(false);
+		when(projectAccessService.isMemberForUpdate(project, creator)).thenReturn(false);
 		assertBusinessError(
 			() -> summaryAccessService.requireWritable(authentication, SUMMARY_ID),
 			ErrorCode.NOT_FOUND);
 
 		when(currentUserService.requireForUpdate(authentication)).thenReturn(outsider);
-		when(projectAccessService.isMember(project, outsider)).thenReturn(false);
+		when(projectAccessService.isMemberForUpdate(project, outsider)).thenReturn(false);
 		assertBusinessError(
 			() -> summaryAccessService.requireWritable(authentication, SUMMARY_ID),
 			ErrorCode.NOT_FOUND);
@@ -204,7 +204,7 @@ class SummaryAccessServiceTests {
 		project.setArchivedAt(LocalDateTime.now());
 		when(projectAccessService.requireProjectForUpdate(PROJECT_ID)).thenReturn(project);
 		when(currentUserService.requireForUpdate(authentication)).thenReturn(creator);
-		when(projectAccessService.isMember(project, creator)).thenReturn(true);
+		when(projectAccessService.isMemberForUpdate(project, creator)).thenReturn(true);
 		doThrow(new BusinessException(ErrorCode.PROJECT_ARCHIVED))
 			.when(projectAccessService).requireUnarchived(project);
 
@@ -221,7 +221,7 @@ class SummaryAccessServiceTests {
 	@Test
 	void writeLocksUserThenProjectThenReloadsAndLocksSummary() {
 		stubWrite(creator);
-		when(projectAccessService.isMember(project, creator)).thenReturn(true);
+		when(projectAccessService.isMemberForUpdate(project, creator)).thenReturn(true);
 
 		summaryAccessService.requireWritable(authentication, SUMMARY_ID);
 

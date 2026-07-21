@@ -3,6 +3,7 @@ package hgc.flowsync.auth;
 import hgc.flowsync.common.error.BusinessException;
 import hgc.flowsync.common.error.ErrorCode;
 import hgc.flowsync.user.CurrentUserService;
+import hgc.flowsync.user.DatabaseUserDetailsService;
 import hgc.flowsync.user.User;
 import hgc.flowsync.user.UserMapper;
 import hgc.flowsync.user.UserResponse;
@@ -11,9 +12,6 @@ import hgc.flowsync.user.PasswordPolicy;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.security.authentication.AccountStatusException;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
@@ -31,9 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AuthService {
 
-	private final AuthenticationManager authenticationManager;
 	private final UserMapper userMapper;
 	private final PasswordEncoder passwordEncoder;
+	private final String dummyPasswordHash;
 	private final SessionRegistry sessionRegistry;
 	private final UserService userService;
 	private final CurrentUserService currentUserService;
@@ -44,15 +42,14 @@ public class AuthService {
 		new ChangeSessionIdAuthenticationStrategy();
 
 	public AuthService(
-		AuthenticationManager authenticationManager,
 		UserMapper userMapper,
 		PasswordEncoder passwordEncoder,
 		SessionRegistry sessionRegistry,
 		UserService userService,
 		CurrentUserService currentUserService) {
-		this.authenticationManager = authenticationManager;
 		this.userMapper = userMapper;
 		this.passwordEncoder = passwordEncoder;
+		this.dummyPasswordHash = passwordEncoder.encode("flowsync-dummy-password");
 		this.sessionRegistry = sessionRegistry;
 		this.userService = userService;
 		this.currentUserService = currentUserService;
@@ -67,16 +64,18 @@ public class AuthService {
 		if (!PasswordPolicy.isBcryptCompatible(password)) {
 			throw new BusinessException(ErrorCode.INVALID_CREDENTIALS);
 		}
-		userMapper.selectOne(Wrappers.<User>lambdaQuery()
+		User user = userMapper.selectOne(Wrappers.<User>lambdaQuery()
 			.eq(User::getUsername, username)
 			.last("FOR UPDATE"));
-		Authentication authentication;
-		try {
-			authentication = authenticationManager.authenticate(
-				UsernamePasswordAuthenticationToken.unauthenticated(username, password));
-		} catch (BadCredentialsException | AccountStatusException exception) {
+		boolean passwordMatches = passwordEncoder.matches(
+			password,
+			user == null ? dummyPasswordHash : user.getPasswordHash());
+		if (user == null || !user.isActive() || !passwordMatches) {
 			throw new BusinessException(ErrorCode.INVALID_CREDENTIALS);
 		}
+		var principal = DatabaseUserDetailsService.toUserDetails(user);
+		Authentication authentication = UsernamePasswordAuthenticationToken.authenticated(
+			principal, null, principal.getAuthorities());
 		sessionAuthenticationStrategy.onAuthentication(authentication, request, response);
 		SecurityContext context = contextHolderStrategy.createEmptyContext();
 		context.setAuthentication(authentication);

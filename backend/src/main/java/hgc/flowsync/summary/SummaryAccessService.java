@@ -42,7 +42,7 @@ public class SummaryAccessService {
 	public ProjectContext requireCreatable(Authentication authentication, Long projectId) {
 		User currentUser = currentUserService.requireForUpdate(authentication);
 		Project project = projectAccessService.requireProjectForUpdate(projectId);
-		requireWritableMember(project, currentUser);
+		requireWritableMemberForUpdate(project, currentUser);
 		projectAccessService.requireUnarchived(project);
 		return new ProjectContext(project, currentUser);
 	}
@@ -56,7 +56,7 @@ public class SummaryAccessService {
 		if (!Objects.equals(summary.getProjectId(), project.getId())) {
 			throw new BusinessException(ErrorCode.NOT_FOUND);
 		}
-		requireVisible(project, currentUser);
+		requireVisibleForUpdate(project, currentUser);
 		if (projectAccessService.isAdmin(currentUser)) {
 			throw new BusinessException(ErrorCode.FORBIDDEN);
 		}
@@ -94,11 +94,18 @@ public class SummaryAccessService {
 		}
 	}
 
-	private void requireWritableMember(Project project, User currentUser) {
+	private void requireVisibleForUpdate(Project project, User currentUser) {
+		if (!projectAccessService.isAdmin(currentUser)
+			&& !projectAccessService.isMemberForUpdate(project, currentUser)) {
+			throw new BusinessException(ErrorCode.NOT_FOUND);
+		}
+	}
+
+	private void requireWritableMemberForUpdate(Project project, User currentUser) {
 		if (projectAccessService.isAdmin(currentUser)) {
 			throw new BusinessException(ErrorCode.FORBIDDEN);
 		}
-		if (!projectAccessService.isMember(project, currentUser)) {
+		if (!projectAccessService.isMemberForUpdate(project, currentUser)) {
 			throw new BusinessException(ErrorCode.NOT_FOUND);
 		}
 	}

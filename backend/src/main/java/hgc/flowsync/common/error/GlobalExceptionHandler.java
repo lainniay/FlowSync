@@ -45,7 +45,7 @@ public final class GlobalExceptionHandler extends ResponseEntityExceptionHandler
 	@ExceptionHandler(BusinessException.class)
 	ResponseEntity<Object> handleBusinessException(BusinessException exception, WebRequest request) {
 		ErrorCode code = exception.code();
-		return response(code, code.status().getReasonPhrase(), code.detail(), List.of(), request);
+		return response(code, code.status().getReasonPhrase(), code.detail(), exception.errors(), request);
 	}
 
 	@ExceptionHandler(ConstraintViolationException.class)
