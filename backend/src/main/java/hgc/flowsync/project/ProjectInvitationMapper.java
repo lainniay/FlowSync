@@ -13,6 +13,14 @@ public interface ProjectInvitationMapper extends BaseMapper<ProjectInvitation> {
 			.eq(ProjectInvitation::getStatus, InvitationStatus.PENDING)) > 0;
 	}
 
+	default boolean existsPendingByInviteeIdForUpdate(Long inviteeId) {
+		return !selectList(Wrappers.<ProjectInvitation>lambdaQuery()
+			.select(ProjectInvitation::getId)
+			.eq(ProjectInvitation::getInviteeId, inviteeId)
+			.eq(ProjectInvitation::getStatus, InvitationStatus.PENDING)
+			.last("LIMIT 1 FOR UPDATE")).isEmpty();
+	}
+
 	default ProjectInvitation selectByProjectIdAndInviteeIdForUpdate(Long projectId, Long inviteeId) {
 		return selectOne(Wrappers.<ProjectInvitation>lambdaQuery()
 			.eq(ProjectInvitation::getProjectId, projectId)

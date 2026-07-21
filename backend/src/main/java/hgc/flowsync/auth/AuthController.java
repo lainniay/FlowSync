@@ -79,7 +79,7 @@ public final class AuthController {
 
 	record LoginRequest(
 		@NotBlank @Size(max = 50) String username,
-		@NotEmpty String password) {
+		String password) {
 	}
 
 	record CsrfResponse(String token, String headerName) {

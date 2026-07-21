@@ -54,6 +54,11 @@ public class ProjectAccessService {
 		return projectMemberMapper.existsByProjectIdAndUserId(project.getId(), user.getId());
 	}
 
+	public boolean isMemberForUpdate(Project project, User user) {
+		return projectMemberMapper.existsByProjectIdAndUserIdForUpdate(
+			project.getId(), user.getId());
+	}
+
 	public void requireOwner(Project project, User user) {
 		if (!isOwner(project, user)) {
 			throw new BusinessException(ErrorCode.FORBIDDEN);
@@ -62,7 +67,7 @@ public class ProjectAccessService {
 
 	public void requireMemberOrAdmin(Project project, User user) {
 		if (!isAdmin(user) && !isMember(project, user)) {
-			throw new BusinessException(ErrorCode.FORBIDDEN);
+			throw new BusinessException(ErrorCode.NOT_FOUND);
 		}
 	}
 

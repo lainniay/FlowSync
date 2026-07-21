@@ -156,7 +156,7 @@ public class OverviewService {
 				User operator = operators.get(taskLog.getOperatorId());
 				activities.add(new OverviewResponse.Activity(
 					"TASK_PROGRESS_ADDED",
-					task.getId().toString(),
+					taskLog.getId().toString(),
 					operator.getDisplayName() + " updated \"" + task.getTitle()
 						+ "\" progress to " + taskLog.getProgressPercent() + "%.",
 					ApiDateTime.toInstant(taskLog.getCreatedAt())));

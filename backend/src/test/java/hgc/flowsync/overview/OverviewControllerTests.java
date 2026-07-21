@@ -38,6 +38,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.hamcrest.Matchers.contains;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -75,7 +76,7 @@ class OverviewControllerTests {
 		Task overdue = insertTask(visible, member, TaskStatus.IN_PROGRESS, LocalDate.now().minusDays(1));
 		insertTask(visible, member, TaskStatus.CANCELLED, LocalDate.now().minusDays(1));
 		insertTask(hidden, otherOwner, TaskStatus.BLOCKED, null);
-		insertTaskLog(overdue, member);
+		TaskLog taskLog = insertTaskLog(overdue, member);
 		insertSummary(visible, completed, owner);
 
 		mockMvc.perform(get("/api/overview").session(login(member)))
@@ -96,6 +97,8 @@ class OverviewControllerTests {
 			.andExpect(jsonPath("$.recentActivities[?(@.type == 'PROJECT_CREATED')]").exists())
 			.andExpect(jsonPath("$.recentActivities[?(@.type == 'TASK_CREATED')]").exists())
 			.andExpect(jsonPath("$.recentActivities[?(@.type == 'TASK_PROGRESS_ADDED')]").exists())
+			.andExpect(jsonPath("$.recentActivities[?(@.type == 'TASK_PROGRESS_ADDED')].resourceId")
+				.value(contains(taskLog.getId().toString())))
 			.andExpect(jsonPath("$.recentActivities[?(@.type == 'SUMMARY_CREATED')]").exists())
 			.andExpect(jsonPath("$.recentActivities[0].occurredAt").isNotEmpty());
 	}
@@ -198,13 +201,14 @@ class OverviewControllerTests {
 		return taskMapper.selectById(task.getId());
 	}
 
-	private void insertTaskLog(Task task, User operator) {
+	private TaskLog insertTaskLog(Task task, User operator) {
 		TaskLog taskLog = new TaskLog();
 		taskLog.setTaskId(task.getId());
 		taskLog.setOperatorId(operator.getId());
 		taskLog.setProgressPercent(50);
 		taskLog.setContent("Half complete");
 		taskLogMapper.insert(taskLog);
+		return taskLog;
 	}
 
 	private void insertSummary(Project project, Task task, User creator) {

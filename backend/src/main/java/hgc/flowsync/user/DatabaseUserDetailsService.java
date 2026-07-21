@@ -21,6 +21,10 @@ public final class DatabaseUserDetailsService implements UserDetailsService {
 		if (user == null) {
 			throw new UsernameNotFoundException("User not found");
 		}
+		return toUserDetails(user);
+	}
+
+	public static UserDetails toUserDetails(User user) {
 		return org.springframework.security.core.userdetails.User.withUsername(user.getUsername())
 			.password(user.getPasswordHash())
 			.roles(user.getSystemRole().name())

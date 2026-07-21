@@ -8,6 +8,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import hgc.flowsync.user.SystemRole;
+import hgc.flowsync.user.DatabaseUserDetailsService;
 import hgc.flowsync.user.User;
 import hgc.flowsync.user.UserMapper;
 import hgc.flowsync.user.UserService;
@@ -30,6 +31,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
@@ -44,6 +47,8 @@ class AuthConcurrencyTests {
 	private SessionRegistry sessionRegistry;
 	@MockitoSpyBean
 	private UserService userService;
+	@MockitoSpyBean
+	private DatabaseUserDetailsService databaseUserDetailsService;
 
 	@AfterEach
 	void deleteCreatedUser() {
@@ -103,6 +108,19 @@ class AuthConcurrencyTests {
 		}
 
 		assertThat(sessionRegistry.getSessionInformation(request.getSession().getId()).isExpired()).isTrue();
+	}
+
+	@Test
+	void loginAuthenticatesFromTheLockedUserWithoutReloadingIt() {
+		User user = insertUser();
+
+		authService.login(
+			user.getUsername(),
+			"test-password",
+			new MockHttpServletRequest(),
+			new MockHttpServletResponse());
+
+		verify(databaseUserDetailsService, never()).loadUserByUsername(anyString());
 	}
 
 	@Test
