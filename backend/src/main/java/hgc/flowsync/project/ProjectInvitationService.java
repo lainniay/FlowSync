@@ -1,6 +1,5 @@
 package hgc.flowsync.project;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -9,6 +8,7 @@ import java.util.Map;
 
 import hgc.flowsync.common.error.BusinessException;
 import hgc.flowsync.common.error.ErrorCode;
+import hgc.flowsync.common.time.ApiDateTime;
 import hgc.flowsync.user.CurrentUserService;
 import hgc.flowsync.user.SystemRole;
 import hgc.flowsync.user.User;
@@ -138,7 +138,7 @@ public class ProjectInvitationService {
 			.last("FOR UPDATE"));
 		requirePending(invitation);
 		invitation.setStatus(InvitationStatus.CANCELLED);
-		invitation.setRespondedAt(LocalDateTime.now());
+		invitation.setRespondedAt(ApiDateTime.now());
 		projectInvitationMapper.updateById(invitation);
 	}
 
@@ -177,7 +177,7 @@ public class ProjectInvitationService {
 			}
 		}
 		invitation.setStatus(status);
-		invitation.setRespondedAt(LocalDateTime.now());
+		invitation.setRespondedAt(ApiDateTime.now());
 		projectInvitationMapper.updateById(invitation);
 		return response(invitation, project);
 	}
@@ -216,7 +216,12 @@ public class ProjectInvitationService {
 		List<Long> userIds = new ArrayList<>(requestedUserIds.size());
 		HashSet<Long> seen = new HashSet<>();
 		for (int index = 0; index < requestedUserIds.size(); index++) {
-			Long userId = Long.parseLong(requestedUserIds.get(index));
+			Long userId;
+			try {
+				userId = Long.parseLong(requestedUserIds.get(index));
+			} catch (NumberFormatException exception) {
+				throw new BusinessException(ErrorCode.VALIDATION_ERROR, userIdField(index));
+			}
 			if (!seen.add(userId)) {
 				throw new BusinessException(ErrorCode.VALIDATION_ERROR, userIdField(index));
 			}

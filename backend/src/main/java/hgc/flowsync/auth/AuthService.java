@@ -96,7 +96,7 @@ public class AuthService {
 		String phone,
 		String email) {
 		return userService.updateProfile(
-			currentUserService.require(authentication),
+			currentUserService.requireForUpdate(authentication),
 			displayName,
 			phone,
 			email);

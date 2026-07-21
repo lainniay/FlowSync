@@ -79,7 +79,7 @@ public final class AuthController {
 
 	record LoginRequest(
 		@NotBlank @Size(max = 50) String username,
-		String password) {
+		@NotEmpty String password) {
 	}
 
 	record CsrfResponse(String token, String headerName) {
@@ -87,7 +87,7 @@ public final class AuthController {
 
 	record UpdateProfileRequest(
 		@JsonProperty(required = true) @NotBlank @Size(max = 50) String displayName,
-		@JsonProperty(required = true) @Size(max = 20) String phone,
+		@JsonProperty(required = true) @Size(min = 1, max = 20) String phone,
 		@JsonProperty(required = true) @Size(min = 1, max = 100) @Email String email) {
 	}
 

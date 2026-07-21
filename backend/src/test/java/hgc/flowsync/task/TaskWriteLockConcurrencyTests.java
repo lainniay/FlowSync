@@ -12,6 +12,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import hgc.flowsync.common.error.BusinessException;
@@ -270,6 +271,37 @@ class TaskWriteLockConcurrencyTests {
 			releaseReopen.countDown();
 			shutdown(executor);
 		}
+	}
+
+	@Test
+	void statusUpdateReturnsConflictWhenAssigneeKeepsChangingAcrossRetries() {
+		User owner = insertUser("Owner");
+		User firstAssignee = insertUser("First Assignee");
+		User secondAssignee = insertUser("Second Assignee");
+		Project project = insertProject(owner);
+		addMember(project, firstAssignee);
+		addMember(project, secondAssignee);
+		Task task = insertTask(project, owner, firstAssignee);
+		AtomicInteger attempts = new AtomicInteger();
+		UserWriteLockService lockTarget = AopTestUtils.getUltimateTargetObject(userWriteLockService);
+		doAnswer(invocation -> {
+			if (invocation.getArgument(0, User.class).getId().equals(owner.getId())) {
+				attempts.incrementAndGet();
+				taskMapper.update(null, Wrappers.<Task>lambdaUpdate()
+					.eq(Task::getId, task.getId())
+					.set(Task::getAssigneeId, secondAssignee.getId()));
+			}
+			return invocation.callRealMethod();
+		}).when(lockTarget).lockUsers(any(User.class), any(Long[].class));
+
+		assertThatThrownBy(() -> taskService.updateStatus(
+			authentication(owner), task.getId(), TaskStatus.COMPLETED))
+			.isInstanceOfSatisfying(BusinessException.class, exception -> {
+				assertThat(exception.code()).isEqualTo(ErrorCode.TASK_ASSIGNEE_CHANGED);
+				assertThat(exception.code().status().value()).isEqualTo(409);
+			});
+		assertThat(attempts).hasValue(3);
+		assertThat(taskMapper.selectById(task.getId()).getAssigneeId()).isEqualTo(firstAssignee.getId());
 	}
 
 	@Test

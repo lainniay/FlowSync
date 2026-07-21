@@ -103,6 +103,18 @@ class ProjectMembershipControllerTests {
 			.andExpect(status().isUnprocessableEntity())
 			.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
 			.andExpect(jsonPath("$.errors[0].field").value("userIds[1]"));
+		for (List<String> invalidIds : List.of(
+			java.util.Arrays.asList((String) null),
+			List.of("9".repeat(30)))) {
+			postRawIds(login(admin), "/api/projects/" + project.getId() + "/members", invalidIds)
+				.andExpect(status().isUnprocessableEntity())
+				.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+				.andExpect(jsonPath("$.errors[0].field").value("userIds[0]"));
+			postRawIds(login(owner), "/api/projects/" + project.getId() + "/invitations", invalidIds)
+				.andExpect(status().isUnprocessableEntity())
+				.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+				.andExpect(jsonPath("$.errors[0].field").value("userIds[0]"));
+		}
 		getMembers(login(valid), project)
 			.andExpect(status().isNotFound())
 			.andExpect(jsonPath("$.code").value("NOT_FOUND"));
@@ -305,12 +317,16 @@ class ProjectMembershipControllerTests {
 	}
 
 	private ResultActions postIds(LoginSession session, String path, User... users) throws Exception {
+		return postRawIds(session, path, java.util.Arrays.stream(users)
+			.map(user -> user.getId().toString()).toList());
+	}
+
+	private ResultActions postRawIds(LoginSession session, String path, List<String> userIds) throws Exception {
 		return mockMvc.perform(post(path)
 			.session(session.session())
 			.header(session.headerName(), session.token())
 			.contentType(MediaType.APPLICATION_JSON)
-			.content(objectMapper.writeValueAsBytes(new UserIdsBody(
-				java.util.Arrays.stream(users).map(user -> user.getId().toString()).toList()))));
+			.content(objectMapper.writeValueAsBytes(new UserIdsBody(userIds))));
 	}
 
 	private ResultActions getMembers(LoginSession session, Project project) throws Exception {

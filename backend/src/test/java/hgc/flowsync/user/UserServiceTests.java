@@ -19,6 +19,7 @@ class UserServiceTests {
 	void concurrentUsernameConflictUsesBusinessError() {
 		UserMapper userMapper = mock(UserMapper.class);
 		PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
+		UserWriteLockService userWriteLockService = mock(UserWriteLockService.class);
 		UserService userService = new UserService(
 			userMapper,
 			passwordEncoder,
@@ -27,13 +28,21 @@ class UserServiceTests {
 			mock(hgc.flowsync.project.ProjectMemberMapper.class),
 			mock(hgc.flowsync.project.ProjectInvitationMapper.class),
 			mock(hgc.flowsync.task.TaskMapper.class),
-			mock(UserWriteLockService.class));
+			userWriteLockService);
+		User actingAdmin = new User();
+		actingAdmin.setId(1L);
+		actingAdmin.setUsername("admin");
+		actingAdmin.setSystemRole(SystemRole.ADMIN);
+		actingAdmin.setActive(true);
+		when(userMapper.selectOne(any())).thenReturn(actingAdmin);
+		when(userWriteLockService.lockUsersById(any())).thenReturn(java.util.Map.of(1L, actingAdmin));
 		when(userMapper.selectCount(any())).thenReturn(0L);
 		when(passwordEncoder.encode("initial-test-password")).thenReturn("encoded-password");
 		doThrow(new DuplicateKeyException("private database detail"))
 			.when(userMapper).insert(any(User.class));
 
 		assertThatThrownBy(() -> userService.create(
+			"admin",
 			"duplicate",
 			"initial-test-password",
 			"Duplicate User",

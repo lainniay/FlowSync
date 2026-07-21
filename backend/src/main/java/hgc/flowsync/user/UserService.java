@@ -1,5 +1,6 @@
 package hgc.flowsync.user;
 
+import java.util.List;
 import java.util.TreeSet;
 
 import hgc.flowsync.common.api.PageResponse;
@@ -17,6 +18,8 @@ import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class UserService {
@@ -85,15 +88,18 @@ public class UserService {
 
 	@Transactional
 	public UserResponse create(
+		String actingUsername,
 		String username,
 		String initialPassword,
 		String displayName,
 		SystemRole systemRole,
 		String phone,
 		String email) {
-		if (systemRole == SystemRole.ADMIN) {
-			userWriteLockService.lockAdminRoleChanges();
-		}
+		// Serialize acting-admin revalidation with concurrent role and active-state changes.
+		userWriteLockService.lockAdminRoleChanges();
+		User actingAdmin = findActingUser(actingUsername);
+		requireActingAdmin(userWriteLockService.lockUsersById(List.of(actingAdmin.getId()))
+			.get(actingAdmin.getId()));
 		if (userMapper.selectCount(Wrappers.<User>lambdaQuery()
 			.eq(User::getUsername, username)) > 0) {
 			throw new BusinessException(ErrorCode.USERNAME_ALREADY_EXISTS);
@@ -115,10 +121,12 @@ public class UserService {
 	}
 
 	@Transactional
-	public void resetPassword(Long userId, String newPassword) {
-		User user = userMapper.selectOne(Wrappers.<User>lambdaQuery()
-			.eq(User::getId, userId)
-			.last("FOR UPDATE"));
+	public void resetPassword(String actingUsername, Long userId, String newPassword) {
+		userWriteLockService.lockAdminRoleChanges();
+		User actingAdmin = findActingUser(actingUsername);
+		var lockedUsers = userWriteLockService.lockUsersById(List.of(actingAdmin.getId(), userId));
+		requireActingAdmin(lockedUsers.get(actingAdmin.getId()));
+		User user = lockedUsers.get(userId);
 		if (user == null) {
 			throw new BusinessException(ErrorCode.NOT_FOUND);
 		}
@@ -127,6 +135,7 @@ public class UserService {
 
 	@Transactional
 	public UserResponse update(
+		String actingUsername,
 		Long userId,
 		String displayName,
 		String phone,
@@ -134,15 +143,19 @@ public class UserService {
 		SystemRole systemRole,
 		boolean active) {
 		userWriteLockService.lockAdminRoleChanges();
+		User actingAdmin = findActingUser(actingUsername);
 		var userIds = new TreeSet<>(userMapper.selectList(Wrappers.<User>lambdaQuery()
 			.select(User::getId)
 			.eq(User::getSystemRole, SystemRole.ADMIN)
 			.eq(User::isActive, true)).stream().map(User::getId).toList());
 		userIds.add(userId);
-		return updateLocked(userId, displayName, phone, email, systemRole, active, userIds);
+		userIds.add(actingAdmin.getId());
+		return updateLocked(
+			actingAdmin.getId(), userId, displayName, phone, email, systemRole, active, userIds);
 	}
 
 	private UserResponse updateLocked(
+		Long actingUserId,
 		Long userId,
 		String displayName,
 		String phone,
@@ -151,6 +164,7 @@ public class UserService {
 		boolean active,
 		TreeSet<Long> userIds) {
 		var lockedUsers = userWriteLockService.lockUsersById(userIds);
+		requireActingAdmin(lockedUsers.get(actingUserId));
 		User user = lockedUsers.get(userId);
 		if (user == null) {
 			throw new BusinessException(ErrorCode.NOT_FOUND);
@@ -194,6 +208,23 @@ public class UserService {
 		return UserResponse.from(userMapper.selectById(userId));
 	}
 
+	private User findActingUser(String username) {
+		User user = userMapper.selectOne(Wrappers.<User>lambdaQuery().eq(User::getUsername, username));
+		if (user == null) {
+			throw new BusinessException(ErrorCode.UNAUTHORIZED);
+		}
+		return user;
+	}
+
+	private static void requireActingAdmin(User user) {
+		if (user == null || !user.isActive()) {
+			throw new BusinessException(ErrorCode.UNAUTHORIZED);
+		}
+		if (user.getSystemRole() != SystemRole.ADMIN) {
+			throw new BusinessException(ErrorCode.FORBIDDEN);
+		}
+	}
+
 	public UserResponse updateProfile(User user, String displayName, String phone, String email) {
 		userMapper.update(null, Wrappers.<User>lambdaUpdate()
 			.eq(User::getId, user.getId())
@@ -211,7 +242,27 @@ public class UserService {
 	}
 
 	private void invalidateSessions(String username) {
-		sessionRegistry.getAllSessions(username, false).forEach(SessionInformation::expireNow);
+		List<String> sessionIds = sessionRegistry.getAllSessions(username, false).stream()
+			.map(SessionInformation::getSessionId)
+			.toList();
+		if (TransactionSynchronizationManager.isActualTransactionActive()
+			&& TransactionSynchronizationManager.isSynchronizationActive()) {
+			TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+				@Override
+				public void afterCommit() {
+					invalidateSessionsNow(sessionIds);
+				}
+			});
+			return;
+		}
+		invalidateSessionsNow(sessionIds);
+	}
+
+	private void invalidateSessionsNow(List<String> sessionIds) {
+		sessionIds.stream()
+			.map(sessionRegistry::getSessionInformation)
+			.filter(java.util.Objects::nonNull)
+			.forEach(SessionInformation::expireNow);
 	}
 
 	private static void applySort(LambdaQueryWrapper<User> query, String sort) {

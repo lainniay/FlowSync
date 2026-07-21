@@ -4,10 +4,12 @@ services:
     ports:
       - "127.0.0.1:3306:3306"
     environment:
+      TZ: Asia/Shanghai
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    command: ["--default-time-zone=+08:00"]
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:

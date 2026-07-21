@@ -1,6 +1,7 @@
 package hgc.flowsync.auth;
 
 import java.util.UUID;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -12,6 +13,9 @@ import hgc.flowsync.user.DatabaseUserDetailsService;
 import hgc.flowsync.user.User;
 import hgc.flowsync.user.UserMapper;
 import hgc.flowsync.user.UserService;
+import hgc.flowsync.common.error.BusinessException;
+import hgc.flowsync.common.error.ErrorCode;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +27,10 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -41,6 +49,7 @@ class AuthConcurrencyTests {
 	private final AuthService authService;
 	private final UserMapper userMapper;
 	private final PasswordEncoder passwordEncoder;
+	private final PlatformTransactionManager transactionManager;
 	private Long createdUserId;
 
 	@MockitoSpyBean
@@ -52,6 +61,9 @@ class AuthConcurrencyTests {
 
 	@AfterEach
 	void deleteCreatedUser() {
+		sessionRegistry.getAllPrincipals().forEach(principal ->
+			sessionRegistry.getAllSessions(principal, true).forEach(session ->
+				sessionRegistry.removeSessionInformation(session.getSessionId())));
 		if (createdUserId != null) {
 			userMapper.deleteById(createdUserId);
 		}
@@ -62,11 +74,13 @@ class AuthConcurrencyTests {
 		AuthService authService,
 		UserService userService,
 		UserMapper userMapper,
-		PasswordEncoder passwordEncoder) {
+		PasswordEncoder passwordEncoder,
+		PlatformTransactionManager transactionManager) {
 		this.authService = authService;
 		this.userService = userService;
 		this.userMapper = userMapper;
 		this.passwordEncoder = passwordEncoder;
+		this.transactionManager = transactionManager;
 	}
 
 	@Test
@@ -76,6 +90,10 @@ class AuthConcurrencyTests {
 		CountDownLatch allowRegistration = new CountDownLatch(1);
 		CountDownLatch invalidationReached = new CountDownLatch(1);
 		MockHttpServletRequest request = new MockHttpServletRequest();
+		User admin = userMapper.selectOne(Wrappers.<User>lambdaQuery()
+			.eq(User::getSystemRole, SystemRole.ADMIN)
+			.eq(User::isActive, true)
+			.last("LIMIT 1"));
 
 		doAnswer(invocation -> {
 			registrationReached.countDown();
@@ -96,7 +114,7 @@ class AuthConcurrencyTests {
 			assertThat(registrationReached.await(5, TimeUnit.SECONDS)).isTrue();
 
 			Future<?> reset = executor.submit(() ->
-				userService.resetPassword(user.getId(), "reset-test-password"));
+				userService.resetPassword(admin.getUsername(), user.getId(), "reset-test-password"));
 			try {
 				assertThat(invalidationReached.await(300, TimeUnit.MILLISECONDS)).isFalse();
 			} finally {
@@ -139,6 +157,90 @@ class AuthConcurrencyTests {
 			.isInstanceOf(DataAccessResourceFailureException.class);
 
 		assertThat(userMapper.selectById(user.getId()).getDisplayName()).isEqualTo("Concurrent User");
+	}
+
+	@Test
+	void passwordAndSessionRemainValidWhenTransactionRollsBack() {
+		User user = insertUser();
+		MockHttpServletRequest request = new MockHttpServletRequest();
+		authService.login(
+			user.getUsername(),
+			"test-password",
+			request,
+			new MockHttpServletResponse());
+		doAnswer(invocation -> {
+			invocation.callRealMethod();
+			throw new DataAccessResourceFailureException("forced password failure");
+		}).when(userService).updatePassword(any(User.class), eq("reset-test-password"));
+
+		assertThatThrownBy(() -> authService.changePassword(
+			UsernamePasswordAuthenticationToken.authenticated(user.getUsername(), "", java.util.List.of()),
+			"test-password",
+			"reset-test-password"))
+			.isInstanceOf(DataAccessResourceFailureException.class);
+
+		assertThat(passwordEncoder.matches(
+			"test-password", userMapper.selectById(user.getId()).getPasswordHash())).isTrue();
+		assertThat(sessionRegistry.getSessionInformation(request.getSession().getId()).isExpired()).isFalse();
+	}
+
+	@Test
+	void profileUpdateCannotPassConcurrentDeactivation() throws Exception {
+		User user = insertUser();
+		CountDownLatch userLocked = new CountDownLatch(1);
+		CountDownLatch allowDeactivation = new CountDownLatch(1);
+		try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+			Future<?> deactivation = executor.submit(() ->
+				new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+					userMapper.selectOne(Wrappers.<User>lambdaQuery()
+						.eq(User::getId, user.getId())
+						.last("FOR UPDATE"));
+					userLocked.countDown();
+					try {
+						assertThat(allowDeactivation.await(5, TimeUnit.SECONDS)).isTrue();
+					} catch (InterruptedException exception) {
+						Thread.currentThread().interrupt();
+						throw new AssertionError(exception);
+					}
+					userMapper.update(null, Wrappers.<User>lambdaUpdate()
+						.eq(User::getId, user.getId())
+						.set(User::isActive, false));
+				}));
+			assertThat(userLocked.await(5, TimeUnit.SECONDS)).isTrue();
+			Future<?> profile = executor.submit(() -> authService.updateProfile(
+				UsernamePasswordAuthenticationToken.authenticated(user.getUsername(), "", List.of()),
+				"Changed Name", null, null));
+			assertThatThrownBy(() -> profile.get(300, TimeUnit.MILLISECONDS))
+				.isInstanceOf(java.util.concurrent.TimeoutException.class);
+			allowDeactivation.countDown();
+			deactivation.get(5, TimeUnit.SECONDS);
+			assertThatThrownBy(() -> profile.get(5, TimeUnit.SECONDS))
+				.isInstanceOf(java.util.concurrent.ExecutionException.class)
+				.satisfies(exception -> {
+					Throwable cause = exception.getCause();
+					assertThat(cause).isInstanceOf(BusinessException.class);
+					assertThat(((BusinessException) cause).code()).isEqualTo(ErrorCode.UNAUTHORIZED);
+				});
+		}
+		assertThat(userMapper.selectById(user.getId()).getDisplayName()).isEqualTo("Concurrent User");
+	}
+
+	@Test
+	void sessionCreatedAfterCommitIsNotInvalidated() {
+		User user = insertUser();
+		sessionRegistry.registerNewSession("old-session", user.getUsername());
+		new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+			TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+				@Override
+				public void afterCommit() {
+					sessionRegistry.registerNewSession("new-session", user.getUsername());
+				}
+			});
+			userService.updatePassword(user, "new-test-password");
+		});
+
+		assertThat(sessionRegistry.getSessionInformation("old-session").isExpired()).isTrue();
+		assertThat(sessionRegistry.getSessionInformation("new-session").isExpired()).isFalse();
 	}
 
 	private User insertUser() {

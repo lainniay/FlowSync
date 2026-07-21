@@ -5,6 +5,7 @@ import java.util.List;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -49,6 +50,6 @@ public class ProjectMemberController {
 	}
 
 	record UserIdsRequest(
-		@JsonProperty(required = true) @NotEmpty List<@Pattern(regexp = "[1-9]\\d*") String> userIds) {
+		@JsonProperty(required = true) @NotEmpty List<@NotNull @Pattern(regexp = "[1-9]\\d*") String> userIds) {
 	}
 }

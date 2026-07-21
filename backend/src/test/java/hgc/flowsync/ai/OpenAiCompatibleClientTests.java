@@ -154,6 +154,24 @@ class OpenAiCompatibleClientTests {
 		server.createContext("/v1/chat/completions", exchange -> {
 			requests.incrementAndGet();
 			respond(exchange, 200,
+				"{\"choices\":[{\"message\":{\"content\":\"first\",\"content\":\"second\"}}]}");
+		});
+		assertBusinessError(() -> client.generateSuggestion("system", "user"),
+			ErrorCode.AI_PROVIDER_ERROR);
+
+		server.removeContext("/v1/chat/completions");
+		server.createContext("/v1/chat/completions", exchange -> {
+			requests.incrementAndGet();
+			respond(exchange, 200,
+				"{\"choices\":[{\"message\":{\"content\":\"ignored\"}}]} trailing prose");
+		});
+		assertBusinessError(() -> client.generateSuggestion("system", "user"),
+			ErrorCode.AI_PROVIDER_ERROR);
+
+		server.removeContext("/v1/chat/completions");
+		server.createContext("/v1/chat/completions", exchange -> {
+			requests.incrementAndGet();
+			respond(exchange, 200,
 				"{\"choices\":[{\"message\":{\"content\":\"   \"}}]}");
 		});
 		assertBusinessError(() -> client.generateSuggestion("system", "user"),
@@ -182,7 +200,7 @@ class OpenAiCompatibleClientTests {
 				"{\"extra\":true,\"choices\":[{\"message\":{\"content\":\"recovered\"}}]}");
 		});
 		assertThat(client.generateSuggestion("system", "user")).isEqualTo("recovered");
-		assertThat(requests).hasValue(5);
+		assertThat(requests).hasValue(7);
 	}
 
 	@Test

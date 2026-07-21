@@ -121,12 +121,13 @@ class UserUpdateConcurrencyTests {
 			User first = insertAdmin(firstUsername);
 			Future<UserResponse> deactivate = executor.submit(() -> {
 				updateThread.set(Thread.currentThread());
-				return userService.update(first.getId(), first.getDisplayName(), null, null,
+				return userService.update(first.getUsername(), first.getId(), first.getDisplayName(), null, null,
 					SystemRole.ADMIN, false);
 			});
 			assertThat(guardAttempted.await(5, TimeUnit.SECONDS)).isTrue();
 
 			UserResponse second = userService.create(
+				first.getUsername(),
 				secondUsername,
 				"test-password",
 				"Concurrent Admin",
@@ -146,6 +147,54 @@ class UserUpdateConcurrencyTests {
 				.set(User::isActive, true));
 			userMapper.delete(Wrappers.<User>lambdaQuery()
 				.in(User::getUsername, firstUsername, secondUsername));
+		}
+	}
+
+	@Test
+	void adminWriteRevalidatesActorAfterConcurrentDeactivation() throws Exception {
+		User actor = insertUser("Acting Admin", SystemRole.ADMIN);
+		User otherAdmin = insertUser("Other Admin", SystemRole.ADMIN);
+		String createdUsername = "cu-created-" + UUID.randomUUID();
+		CountDownLatch deactivationLocked = new CountDownLatch(1);
+		CountDownLatch allowDeactivation = new CountDownLatch(1);
+		AtomicReference<Thread> deactivationThread = new AtomicReference<>();
+		UserWriteLockService lockTarget = AopTestUtils.getUltimateTargetObject(userWriteLockService);
+		doAnswer(invocation -> {
+			Object result = invocation.callRealMethod();
+			if (Thread.currentThread() == deactivationThread.get()) {
+				deactivationLocked.countDown();
+				assertThat(allowDeactivation.await(5, TimeUnit.SECONDS)).isTrue();
+			}
+			return result;
+		}).when(lockTarget).lockAdminRoleChanges();
+
+		try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+			Future<?> deactivation = executor.submit(() -> {
+				deactivationThread.set(Thread.currentThread());
+				return userService.update(
+					otherAdmin.getUsername(), actor.getId(), actor.getDisplayName(), null, null,
+					SystemRole.ADMIN, false);
+			});
+			assertThat(deactivationLocked.await(5, TimeUnit.SECONDS)).isTrue();
+			Future<?> create = executor.submit(() -> userService.create(
+				actor.getUsername(), createdUsername, "test-password", "Created User",
+				SystemRole.USER, null, null));
+			assertThatThrownBy(() -> create.get(300, TimeUnit.MILLISECONDS))
+				.isInstanceOf(TimeoutException.class);
+			allowDeactivation.countDown();
+			deactivation.get(5, TimeUnit.SECONDS);
+			assertThatThrownBy(() -> create.get(5, TimeUnit.SECONDS))
+				.isInstanceOf(java.util.concurrent.ExecutionException.class)
+				.hasCauseInstanceOf(BusinessException.class)
+				.satisfies(exception -> assertThat(((BusinessException) exception.getCause()).code())
+					.isEqualTo(ErrorCode.UNAUTHORIZED));
+			assertThat(userMapper.selectCount(Wrappers.<User>lambdaQuery()
+				.eq(User::getUsername, createdUsername))).isZero();
+		} finally {
+			allowDeactivation.countDown();
+			userMapper.delete(Wrappers.<User>lambdaQuery()
+				.in(User::getId, actor.getId(), otherAdmin.getId()));
+			userMapper.delete(Wrappers.<User>lambdaQuery().eq(User::getUsername, createdUsername));
 		}
 	}
 
@@ -176,7 +225,7 @@ class UserUpdateConcurrencyTests {
 		try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
 			Future<UserResponse> update = executor.submit(() -> {
 				updateThread.set(Thread.currentThread());
-				return userService.update(target.getId(), "Updated Target", null, null,
+				return userService.update(admin.getUsername(), target.getId(), "Updated Target", null, null,
 					SystemRole.USER, true);
 			});
 			assertThat(updateUsersLocked.await(5, TimeUnit.SECONDS)).isTrue();
@@ -206,6 +255,7 @@ class UserUpdateConcurrencyTests {
 		start.await();
 		try {
 			userService.update(
+				user.getUsername(),
 				user.getId(),
 				user.getDisplayName(),
 				null,

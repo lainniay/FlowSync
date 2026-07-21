@@ -213,7 +213,7 @@ public class TaskService {
 					updateStatusOnce(authentication, taskId, status));
 			} catch (StaleTaskAssigneeException exception) {
 				if (attempt == 2) {
-					throw new BusinessException(ErrorCode.VALIDATION_ERROR);
+					throw new BusinessException(ErrorCode.TASK_ASSIGNEE_CHANGED);
 				}
 			}
 		}

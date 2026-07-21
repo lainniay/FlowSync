@@ -1,12 +1,14 @@
 package hgc.flowsync.project;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import hgc.flowsync.common.api.PageResponse;
 import hgc.flowsync.common.error.BusinessException;
 import hgc.flowsync.common.error.ErrorCode;
+import hgc.flowsync.common.time.ApiDateTime;
 import hgc.flowsync.summary.Summary;
 import hgc.flowsync.summary.SummaryMapper;
 import hgc.flowsync.task.Task;
@@ -96,7 +98,7 @@ public class ProjectService {
 		query.orderByAsc(Project::getId)
 			.last("LIMIT " + size + " OFFSET " + (long) page * size);
 		return PageResponse.of(
-			projectMapper.selectList(query).stream().map(this::response).toList(),
+			responses(projectMapper.selectList(query)),
 			page,
 			size,
 			totalElements);
@@ -233,7 +235,7 @@ public class ProjectService {
 		projectAccessService.requireUnarchived(project);
 		projectMapper.update(null, Wrappers.<Project>lambdaUpdate()
 			.eq(Project::getId, projectId)
-			.set(Project::getArchivedAt, LocalDateTime.now()));
+			.set(Project::getArchivedAt, ApiDateTime.now()));
 		return response(projectMapper.selectById(projectId));
 	}
 
@@ -288,19 +290,39 @@ public class ProjectService {
 			.selectByProjectIdAndInviteeIdForUpdate(projectId, inviteeId);
 		if (invitation != null && invitation.getStatus() == InvitationStatus.PENDING) {
 			invitation.setStatus(InvitationStatus.CANCELLED);
-			invitation.setRespondedAt(LocalDateTime.now());
+			invitation.setRespondedAt(ApiDateTime.now());
 			projectInvitationMapper.updateById(invitation);
 		}
 	}
 
 	private ProjectResponse response(Project project) {
-		return ProjectResponse.from(
-			project,
-			userMapper.selectById(project.getOwnerId()),
-			projectMemberMapper.selectCount(Wrappers.<ProjectMember>lambdaQuery()
-				.eq(ProjectMember::getProjectId, project.getId())),
-			taskMapper.countByProjectId(project.getId()),
-			taskMapper.countCompletedByProjectId(project.getId()));
+		return responses(List.of(project)).getFirst();
+	}
+
+	private List<ProjectResponse> responses(List<Project> projects) {
+		if (projects.isEmpty()) {
+			return List.of();
+		}
+		List<Long> projectIds = projects.stream().map(Project::getId).toList();
+		Map<Long, User> owners = userMapper.selectBatchIds(projects.stream()
+			.map(Project::getOwnerId)
+			.distinct()
+			.toList()).stream().collect(Collectors.toMap(User::getId, owner -> owner));
+		Map<Long, Long> memberCounts = projectMemberMapper.countByProjectIds(projectIds).stream()
+			.collect(Collectors.toMap(
+				ProjectMemberMapper.ProjectMemberCount::getProjectId,
+				ProjectMemberMapper.ProjectMemberCount::getMemberCount));
+		Map<Long, TaskMapper.ProjectTaskStats> taskStats = taskMapper.selectProjectStats(projectIds).stream()
+			.collect(Collectors.toMap(TaskMapper.ProjectTaskStats::getProjectId, stats -> stats));
+		return projects.stream().map(project -> {
+			TaskMapper.ProjectTaskStats stats = taskStats.get(project.getId());
+			return ProjectResponse.from(
+				project,
+				owners.get(project.getOwnerId()),
+				memberCounts.getOrDefault(project.getId(), 0L),
+				stats == null ? 0 : stats.getTotal(),
+				stats == null ? 0 : stats.getCompleted());
+		}).toList();
 	}
 
 	private static long parseId(String value) {
