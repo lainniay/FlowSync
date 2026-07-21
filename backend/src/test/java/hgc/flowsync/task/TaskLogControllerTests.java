@@ -344,6 +344,9 @@ class TaskLogControllerTests {
 			"{\"progressPercent\":20,\"content\":\"" + "x".repeat(1001) + "\"}")) {
 			assertProblem(logRequest(post(path), session, body), 422, "VALIDATION_ERROR");
 		}
+		assertProblem(logRequest(post(path), session,
+			"{\"progressPercent\":101,\"content\":\"high\"}"), 422, "VALIDATION_ERROR")
+			.andExpect(jsonPath("$.errors[0].field").value("progressPercent"));
 		assertProblem(logRequest(post(path), session, "[]"), 400, "BAD_REQUEST");
 		assertProblem(logRequest(post(path), session, "\"not an object\""), 400, "BAD_REQUEST");
 
