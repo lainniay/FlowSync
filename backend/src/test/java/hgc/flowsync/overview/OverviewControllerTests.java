@@ -3,6 +3,7 @@ package hgc.flowsync.overview;
 import java.time.LocalDate;
 import java.util.UUID;
 
+import hgc.flowsync.common.time.ApiDateTime;
 import hgc.flowsync.project.Priority;
 import hgc.flowsync.project.Project;
 import hgc.flowsync.project.ProjectMapper;
@@ -72,9 +73,9 @@ class OverviewControllerTests {
 		Project visible = insertProject(owner, "Visible Overview");
 		insertMember(visible, member);
 		Project hidden = insertProject(otherOwner, "Hidden Overview");
-		Task completed = insertTask(visible, member, TaskStatus.COMPLETED, LocalDate.now().minusDays(2));
-		Task overdue = insertTask(visible, member, TaskStatus.IN_PROGRESS, LocalDate.now().minusDays(1));
-		insertTask(visible, member, TaskStatus.CANCELLED, LocalDate.now().minusDays(1));
+		Task completed = insertTask(visible, member, TaskStatus.COMPLETED, ApiDateTime.today().minusDays(2));
+		Task overdue = insertTask(visible, member, TaskStatus.IN_PROGRESS, ApiDateTime.today().minusDays(1));
+		insertTask(visible, member, TaskStatus.CANCELLED, ApiDateTime.today().minusDays(1));
 		insertTask(hidden, otherOwner, TaskStatus.BLOCKED, null);
 		TaskLog taskLog = insertTaskLog(overdue, member);
 		insertSummary(visible, completed, owner);
@@ -101,6 +102,21 @@ class OverviewControllerTests {
 				.value(contains(taskLog.getId().toString())))
 			.andExpect(jsonPath("$.recentActivities[?(@.type == 'SUMMARY_CREATED')]").exists())
 			.andExpect(jsonPath("$.recentActivities[0].occurredAt").isNotEmpty());
+	}
+
+	@Test
+	void recentActivitiesAreLimitedToTen() throws Exception {
+		User owner = insertUser(SystemRole.USER);
+		Project project = insertProject(owner, "Busy Overview");
+		for (int index = 0; index < 12; index++) {
+			insertTask(project, owner, TaskStatus.NOT_STARTED, null);
+		}
+
+		mockMvc.perform(get("/api/overview").session(login(owner)))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.counts.tasks").value(12))
+			.andExpect(jsonPath("$.tasksByStatus[0].count").value(12))
+			.andExpect(jsonPath("$.recentActivities.length()").value(10));
 	}
 
 	@Test

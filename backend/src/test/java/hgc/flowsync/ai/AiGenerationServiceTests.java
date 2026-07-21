@@ -55,10 +55,36 @@ class AiGenerationServiceTests {
 
 	@Test
 	void rejectsMalformedTruncatedAndMixedProviderOutput() {
+		String valid = plan("a", null, "2", "2026-07-20");
 		for (String response : List.of(
 			"not json",
 			"```json\n{\"overview\":\"truncated\"\n```",
-			"Here is the plan: {\"overview\":\"Plan\",\"items\":[]}")) {
+			"Here is the plan: {\"overview\":\"Plan\",\"items\":[]}",
+			valid + " trailing prose",
+			valid + valid,
+			"```json\n" + valid + "\n``` trailing prose")) {
+			when(aiClient.generatePlan(anyString(), anyString())).thenReturn(response);
+			assertThatThrownBy(() -> service.generatePlan(
+				authentication, 1L, new AiTaskPlanGenerateRequest("Goal", null, null)))
+				.isInstanceOf(BusinessException.class)
+				.satisfies(exception -> assertThat(((BusinessException) exception).code())
+					.isEqualTo(ErrorCode.AI_PROVIDER_ERROR));
+		}
+	}
+
+	@Test
+	void rejectsUnknownAndDuplicateProviderFields() {
+		for (String response : List.of(
+			"""
+				{"overview":"Plan","unknown":true,"items":[{"draftId":"a","parentDraftId":null,
+				"title":"Task","description":null,"priority":"MEDIUM","dueDate":null,
+				"assigneeId":"2"}]}
+				""",
+			"""
+				{"overview":"Plan","items":[{"draftId":"a","parentDraftId":null,
+				"title":"First","title":"Second","description":null,"priority":"MEDIUM",
+				"dueDate":null,"assigneeId":"2"}]}
+				""")) {
 			when(aiClient.generatePlan(anyString(), anyString())).thenReturn(response);
 			assertThatThrownBy(() -> service.generatePlan(
 				authentication, 1L, new AiTaskPlanGenerateRequest("Goal", null, null)))

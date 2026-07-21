@@ -12,7 +12,9 @@ import hgc.flowsync.common.error.BusinessException;
 import hgc.flowsync.common.error.ErrorCode;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -126,7 +128,10 @@ public class OpenAiCompatibleClient {
 
 	private String content(byte[] bytes) {
 		try {
-			JsonNode root = objectMapper.readTree(bytes);
+			JsonNode root = objectMapper.reader()
+				.with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+				.with(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+				.readTree(bytes);
 			JsonNode choices = root == null ? null : root.get("choices");
 			JsonNode content = choices == null || !choices.isArray() || choices.isEmpty()
 				? null : choices.get(0).path("message").get("content");

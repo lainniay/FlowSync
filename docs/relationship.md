@@ -118,7 +118,7 @@
 - 已停用的 User 不能登录、接收邀请、加入项目或被分配新任务。
 - Project.startDate 和 Project.endDate 同时存在时，endDate 必须大于或等于 startDate。
 - Project.ownerId 必须指向 `active=true` 且 `systemRole=USER` 的 User，并且该 User 必须同时存在于该项目的 ProjectMember 中。
-- ProjectMember.userId 必须指向 `active=true` 且 `systemRole=USER` 的 User。
+- 创建 ProjectMember 时，userId 必须指向 `active=true` 且 `systemRole=USER` 的 User。User 后续停用时保留既有 ProjectMember 作为历史参与关系，但该用户不能登录、接受新邀请、加入新项目或被分配新任务。
 - owner 创建邀请时，ProjectInvitation.invitedBy 必须是当前 Project.ownerId。
 - ProjectInvitation.inviteeId 必须指向 `active=true`、`systemRole=USER` 且尚未加入该项目的 User。
 - PENDING 邀请只能转换为 ACCEPTED、REJECTED 或 CANCELLED。用户当前不是项目成员时，重新邀请可以将非 PENDING 记录重置为 PENDING。

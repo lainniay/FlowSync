@@ -18,6 +18,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -26,7 +27,9 @@ import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -58,7 +61,15 @@ class UserUpdateControllerTests {
 	@Autowired
 	private TaskMapper taskMapper;
 
+	@AfterEach
+	void deleteCommittedUsers() {
+		if (!TestTransaction.isActive()) {
+			userMapper.delete(Wrappers.<User>lambdaQuery().likeRight(User::getUsername, "update-"));
+		}
+	}
+
 	@Test
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	void adminUpdatesEveryFieldAndAccountChangesInvalidateTargetSessions() throws Exception {
 		User admin = insertUser(SystemRole.ADMIN);
 		User target = insertUser(SystemRole.USER);
@@ -177,6 +188,10 @@ class UserUpdateControllerTests {
 				.content(objectMapper.writeValueAsBytes(body(ordinaryUser, SystemRole.USER, true))))
 			.andExpect(status().isNotFound())
 			.andExpect(jsonPath("$.code").value("NOT_FOUND"));
+		update(adminSession, ordinaryUser, new UpdateUserBody(
+			ordinaryUser.getDisplayName(), "", null, SystemRole.USER, true))
+			.andExpect(status().isUnprocessableEntity())
+			.andExpect(jsonPath("$.errors[0].field").value("phone"));
 	}
 
 	private LoginSession login(User user) throws Exception {

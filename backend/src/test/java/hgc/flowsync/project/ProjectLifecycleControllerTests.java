@@ -276,7 +276,8 @@ class ProjectLifecycleControllerTests {
 			.andExpect(jsonPath("$.archivedAt").value((Object) null));
 		writeWithoutBody(delete("/api/projects/{projectId}/archive", project.getId()), ownerSession)
 			.andExpect(status().isConflict())
-			.andExpect(jsonPath("$.code").value("PROJECT_NOT_ARCHIVED"));
+			.andExpect(jsonPath("$.code").value("PROJECT_NOT_ARCHIVED"))
+			.andExpect(jsonPath("$.detail").value("The project is not archived."));
 		mockMvc.perform(put("/api/projects/{projectId}/archive", project.getId())
 				.session(ownerSession.session()))
 			.andExpect(status().isForbidden())

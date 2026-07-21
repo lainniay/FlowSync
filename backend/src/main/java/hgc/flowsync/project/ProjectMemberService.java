@@ -1,6 +1,5 @@
 package hgc.flowsync.project;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -9,6 +8,7 @@ import java.util.Map;
 
 import hgc.flowsync.common.error.BusinessException;
 import hgc.flowsync.common.error.ErrorCode;
+import hgc.flowsync.common.time.ApiDateTime;
 import hgc.flowsync.task.TaskMapper;
 import hgc.flowsync.user.CurrentUserService;
 import hgc.flowsync.user.SystemRole;
@@ -136,7 +136,7 @@ public class ProjectMemberService {
 			.selectByProjectIdAndInviteeIdForUpdate(projectId, user.getId());
 		if (invitation != null && invitation.getStatus() == InvitationStatus.PENDING) {
 			invitation.setStatus(InvitationStatus.CANCELLED);
-			invitation.setRespondedAt(LocalDateTime.now());
+			invitation.setRespondedAt(ApiDateTime.now());
 			projectInvitationMapper.updateById(invitation);
 		}
 		return ProjectMemberResponse.from(projectMemberMapper.selectById(member.getId()), user);
@@ -146,7 +146,12 @@ public class ProjectMemberService {
 		List<Long> userIds = new ArrayList<>(requestedUserIds.size());
 		HashSet<Long> seen = new HashSet<>();
 		for (int index = 0; index < requestedUserIds.size(); index++) {
-			Long userId = Long.parseLong(requestedUserIds.get(index));
+			Long userId;
+			try {
+				userId = Long.parseLong(requestedUserIds.get(index));
+			} catch (NumberFormatException exception) {
+				throw new BusinessException(ErrorCode.VALIDATION_ERROR, userIdField(index));
+			}
 			if (!seen.add(userId)) {
 				throw new BusinessException(ErrorCode.VALIDATION_ERROR, userIdField(index));
 			}

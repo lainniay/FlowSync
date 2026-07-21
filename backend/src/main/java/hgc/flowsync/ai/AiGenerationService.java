@@ -10,7 +10,8 @@ import java.util.Set;
 
 import hgc.flowsync.common.error.BusinessException;
 import hgc.flowsync.common.error.ErrorCode;
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.core.StreamReadFeature;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.security.core.Authentication;
@@ -97,14 +98,19 @@ public class AiGenerationService {
 			json = json.substring(firstLine + 1, json.length() - 3).trim();
 		}
 		try {
-			JsonNode root = objectMapper.readTree(json);
+			JsonNode root = objectMapper.reader()
+				.with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+				.with(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+				.readTree(json);
 			if (!root.isObject() || !root.path("overview").isTextual() || !root.has("items")
-				|| !root.get("items").isArray()) {
+				|| !root.get("items").isArray() || !hasOnly(root, "overview", "items")) {
 				throw providerError();
 			}
 			for (JsonNode item : root.get("items")) {
 				if (!item.isObject()
 					|| !hasAll(item, "draftId", "parentDraftId", "title", "description",
+						"priority", "dueDate", "assigneeId")
+					|| !hasOnly(item, "draftId", "parentDraftId", "title", "description",
 						"priority", "dueDate", "assigneeId")
 					|| !item.path("draftId").isTextual()
 					|| !nullableText(item.get("parentDraftId"))
@@ -234,6 +240,11 @@ public class AiGenerationService {
 		return true;
 	}
 
+	private static boolean hasOnly(JsonNode node, String... fields) {
+		Set<String> allowed = Set.of(fields);
+		return node.properties().stream().allMatch(entry -> allowed.contains(entry.getKey()));
+	}
+
 	private static boolean nullableText(JsonNode node) {
 		return node != null && (node.isNull() || node.isTextual());
 	}
@@ -242,11 +253,9 @@ public class AiGenerationService {
 		return new BusinessException(ErrorCode.AI_PROVIDER_ERROR);
 	}
 
-	@JsonIgnoreProperties(ignoreUnknown = true)
 	private record ProviderPlan(String overview, List<ProviderItem> items) {
 	}
 
-	@JsonIgnoreProperties(ignoreUnknown = true)
 	private record ProviderItem(
 		String draftId,
 		String parentDraftId,

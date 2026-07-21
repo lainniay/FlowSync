@@ -13,6 +13,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -53,8 +54,9 @@ public class UserController {
 	@PostMapping("/api/users")
 	@PreAuthorize("hasRole('ADMIN')")
 	@ResponseStatus(HttpStatus.CREATED)
-	UserResponse createUser(@Valid @RequestBody CreateUserRequest body) {
+	UserResponse createUser(Authentication authentication, @Valid @RequestBody CreateUserRequest body) {
 		return userService.create(
+			authentication.getName(),
 			body.username(),
 			body.initialPassword(),
 			body.displayName(),
@@ -66,9 +68,11 @@ public class UserController {
 	@PutMapping("/api/users/{userId}")
 	@PreAuthorize("hasRole('ADMIN')")
 	UserResponse updateUser(
+		Authentication authentication,
 		@PathVariable Long userId,
 		@Valid @RequestBody UpdateUserRequest body) {
 		return userService.update(
+			authentication.getName(),
 			userId,
 			body.displayName(),
 			body.phone(),
@@ -81,9 +85,10 @@ public class UserController {
 	@PreAuthorize("hasRole('ADMIN')")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void resetPassword(
+		Authentication authentication,
 		@PathVariable Long userId,
 		@Valid @RequestBody ResetPasswordRequest body) {
-		userService.resetPassword(userId, body.newPassword());
+		userService.resetPassword(authentication.getName(), userId, body.newPassword());
 	}
 
 	record ResetPasswordRequest(@NotEmpty @PasswordPolicy.Valid String newPassword) {
@@ -94,13 +99,13 @@ public class UserController {
 		@JsonProperty(required = true) @NotEmpty @PasswordPolicy.Valid String initialPassword,
 		@JsonProperty(required = true) @NotBlank @Size(max = 50) String displayName,
 		@JsonProperty(required = true) @NotNull SystemRole systemRole,
-		@JsonProperty(required = true) @Size(max = 20) String phone,
+		@JsonProperty(required = true) @Size(min = 1, max = 20) String phone,
 		@JsonProperty(required = true) @Size(min = 1, max = 100) @Email String email) {
 	}
 
 	record UpdateUserRequest(
 		@JsonProperty(required = true) @NotBlank @Size(max = 50) String displayName,
-		@JsonProperty(required = true) @Size(max = 20) String phone,
+		@JsonProperty(required = true) @Size(min = 1, max = 20) String phone,
 		@JsonProperty(required = true) @Size(min = 1, max = 100) @Email String email,
 		@JsonProperty(required = true) @NotNull SystemRole systemRole,
 		@JsonProperty(required = true) @NotNull Boolean active) {
