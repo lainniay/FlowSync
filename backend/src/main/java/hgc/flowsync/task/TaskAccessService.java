@@ -8,7 +8,6 @@ import hgc.flowsync.project.Project;
 import hgc.flowsync.project.ProjectAccessService;
 import hgc.flowsync.user.CurrentUserService;
 import hgc.flowsync.user.User;
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -86,7 +85,7 @@ public class TaskAccessService {
 		task = requireTaskForUpdate(taskId);
 		if (!Objects.equals(task.getProjectId(), project.getId())
 			|| (!projectAccessService.isAdmin(currentUser)
-				&& !projectAccessService.isMember(project, currentUser))) {
+				&& !projectAccessService.isMemberForUpdate(project, currentUser))) {
 			throw new BusinessException(ErrorCode.NOT_FOUND);
 		}
 		return new TaskContext(task, project, currentUser);
@@ -101,9 +100,7 @@ public class TaskAccessService {
 	}
 
 	private Task requireTaskForUpdate(Long taskId) {
-		Task task = taskId == null ? null : taskMapper.selectOne(Wrappers.<Task>lambdaQuery()
-			.eq(Task::getId, taskId)
-			.last("FOR UPDATE"));
+		Task task = taskMapper.selectByIdForUpdate(taskId);
 		if (task == null) {
 			throw new BusinessException(ErrorCode.NOT_FOUND);
 		}

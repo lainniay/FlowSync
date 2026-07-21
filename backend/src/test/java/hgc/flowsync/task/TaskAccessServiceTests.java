@@ -45,7 +45,6 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -136,8 +135,8 @@ class TaskAccessServiceTests {
 		when(currentUserService.requireForUpdate(authentication)).thenReturn(owner);
 		when(projectAccessService.requireProjectForUpdate(PROJECT_ID)).thenReturn(project);
 		when(taskMapper.selectById(TASK_ID)).thenReturn(task);
-		when(taskMapper.selectOne(any())).thenReturn(task);
-		when(projectAccessService.isMember(project, owner)).thenReturn(true);
+		when(taskMapper.selectByIdForUpdate(TASK_ID)).thenReturn(task);
+		when(projectAccessService.isMemberForUpdate(project, owner)).thenReturn(true);
 
 		TaskAccessService.ProjectContext createContext =
 			taskAccessService.requireCreatable(authentication, PROJECT_ID);
@@ -150,7 +149,7 @@ class TaskAccessServiceTests {
 
 		clearInvocations(projectAccessService);
 		when(currentUserService.requireForUpdate(authentication)).thenReturn(member);
-		when(projectAccessService.isMember(project, member)).thenReturn(true);
+		when(projectAccessService.isMemberForUpdate(project, member)).thenReturn(true);
 		doThrow(new BusinessException(ErrorCode.FORBIDDEN))
 			.when(projectAccessService).requireOwner(project, member);
 		assertBusinessError(
@@ -165,7 +164,7 @@ class TaskAccessServiceTests {
 	@Test
 	void onlyOwnerOrAssigneeCanChangeStatusAndCreateTaskLog() {
 		stubWrite(owner);
-		when(projectAccessService.isMember(project, owner)).thenReturn(true);
+		when(projectAccessService.isMemberForUpdate(project, owner)).thenReturn(true);
 		when(projectAccessService.isOwner(project, owner)).thenReturn(true);
 		assertThatCode(() -> taskAccessService.requireStatusWritable(authentication, TASK_ID))
 			.doesNotThrowAnyException();
@@ -174,7 +173,7 @@ class TaskAccessServiceTests {
 
 		stubWrite(assignee);
 		when(projectAccessService.isOwner(project, assignee)).thenReturn(false);
-		when(projectAccessService.isMember(project, assignee)).thenReturn(true);
+		when(projectAccessService.isMemberForUpdate(project, assignee)).thenReturn(true);
 		assertThatCode(() -> taskAccessService.requireStatusWritable(authentication, TASK_ID))
 			.doesNotThrowAnyException();
 		assertThatCode(() -> taskAccessService.requireTaskLogCreatable(authentication, TASK_ID))
@@ -182,7 +181,7 @@ class TaskAccessServiceTests {
 
 		clearInvocations(projectAccessService);
 		stubWrite(member);
-		when(projectAccessService.isMember(project, member)).thenReturn(true);
+		when(projectAccessService.isMemberForUpdate(project, member)).thenReturn(true);
 		when(projectAccessService.isOwner(project, member)).thenReturn(false);
 		assertBusinessError(
 			() -> taskAccessService.requireStatusWritable(authentication, TASK_ID),
@@ -196,7 +195,7 @@ class TaskAccessServiceTests {
 	@Test
 	void removedAssigneeIsHiddenFromStatusAndTaskLogWrites() {
 		stubWrite(assignee);
-		when(projectAccessService.isMember(project, assignee)).thenReturn(false);
+		when(projectAccessService.isMemberForUpdate(project, assignee)).thenReturn(false);
 
 		assertBusinessError(
 			() -> taskAccessService.requireStatusWritable(authentication, TASK_ID),
@@ -210,7 +209,7 @@ class TaskAccessServiceTests {
 	@Test
 	void outsiderIsHiddenFromEveryExistingTaskWrite() {
 		stubWrite(outsider);
-		when(projectAccessService.isMember(project, outsider)).thenReturn(false);
+		when(projectAccessService.isMemberForUpdate(project, outsider)).thenReturn(false);
 
 		assertBusinessError(
 			() -> taskAccessService.requireOwnerWritable(authentication, TASK_ID),
@@ -230,7 +229,7 @@ class TaskAccessServiceTests {
 		when(currentUserService.requireForUpdate(authentication)).thenReturn(admin);
 		when(projectAccessService.requireProjectForUpdate(PROJECT_ID)).thenReturn(project);
 		when(taskMapper.selectById(TASK_ID)).thenReturn(task);
-		when(taskMapper.selectOne(any())).thenReturn(task);
+		when(taskMapper.selectByIdForUpdate(TASK_ID)).thenReturn(task);
 		when(projectAccessService.isAdmin(admin)).thenReturn(true);
 
 		assertBusinessError(
@@ -252,7 +251,7 @@ class TaskAccessServiceTests {
 	void archivedProjectBlocksEveryAuthorizedWriteAccess() {
 		project.setArchivedAt(LocalDateTime.of(2026, 7, 17, 12, 0));
 		stubWrite(owner);
-		when(projectAccessService.isMember(project, owner)).thenReturn(true);
+		when(projectAccessService.isMemberForUpdate(project, owner)).thenReturn(true);
 		when(projectAccessService.isOwner(project, owner)).thenReturn(true);
 		doThrow(new BusinessException(ErrorCode.PROJECT_ARCHIVED))
 			.when(projectAccessService).requireUnarchived(project);
@@ -274,7 +273,7 @@ class TaskAccessServiceTests {
 	@Test
 	void writeAccessLocksUserThenProjectAndReloadsTaskForUpdate() {
 		stubWrite(owner);
-		when(projectAccessService.isMember(project, owner)).thenReturn(true);
+		when(projectAccessService.isMemberForUpdate(project, owner)).thenReturn(true);
 
 		taskAccessService.requireOwnerWritable(authentication, TASK_ID);
 
@@ -282,7 +281,7 @@ class TaskAccessServiceTests {
 		order.verify(currentUserService).requireForUpdate(authentication);
 		order.verify(taskMapper).selectById(TASK_ID);
 		order.verify(projectAccessService).requireProjectForUpdate(PROJECT_ID);
-		order.verify(taskMapper).selectOne(any());
+		order.verify(taskMapper).selectByIdForUpdate(TASK_ID);
 	}
 
 	@Test
@@ -305,8 +304,8 @@ class TaskAccessServiceTests {
 		when(currentUserService.requireForUpdate(authentication)).thenReturn(assignee);
 		when(taskMapper.selectById(TASK_ID)).thenReturn(task);
 		when(projectAccessService.requireProjectForUpdate(PROJECT_ID)).thenReturn(project);
-		when(taskMapper.selectOne(any())).thenReturn(latestTask);
-		when(projectAccessService.isMember(project, assignee)).thenReturn(true);
+		when(taskMapper.selectByIdForUpdate(TASK_ID)).thenReturn(latestTask);
+		when(projectAccessService.isMemberForUpdate(project, assignee)).thenReturn(true);
 
 		TaskAccessService.TaskContext context =
 			taskAccessService.requireStatusWritable(authentication, TASK_ID);
@@ -320,7 +319,7 @@ class TaskAccessServiceTests {
 		when(currentUserService.requireForUpdate(authentication)).thenReturn(owner);
 		when(taskMapper.selectById(TASK_ID)).thenReturn(task);
 		when(projectAccessService.requireProjectForUpdate(PROJECT_ID)).thenReturn(project);
-		when(taskMapper.selectOne(any())).thenReturn(movedTask);
+		when(taskMapper.selectByIdForUpdate(TASK_ID)).thenReturn(movedTask);
 
 		assertBusinessError(
 			() -> taskAccessService.requireOwnerWritable(authentication, TASK_ID),
@@ -339,7 +338,7 @@ class TaskAccessServiceTests {
 		when(currentUserService.requireForUpdate(authentication)).thenReturn(currentUser);
 		when(taskMapper.selectById(TASK_ID)).thenReturn(task);
 		when(projectAccessService.requireProjectForUpdate(PROJECT_ID)).thenReturn(project);
-		when(taskMapper.selectOne(any())).thenReturn(task);
+		when(taskMapper.selectByIdForUpdate(TASK_ID)).thenReturn(task);
 	}
 
 	private static User user(Long id, SystemRole role) {

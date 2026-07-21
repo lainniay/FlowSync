@@ -93,15 +93,23 @@ class ProjectMembershipControllerTests {
 			.andExpect(jsonPath("$.code").value("FORBIDDEN"));
 		postIds(login(admin), "/api/projects/" + project.getId() + "/members", valid, inactive)
 			.andExpect(status().isUnprocessableEntity())
-			.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+			.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+			.andExpect(jsonPath("$.errors[0].field").value("userIds[1]"));
 		postIds(login(admin), "/api/projects/" + project.getId() + "/members", valid, valid)
 			.andExpect(status().isUnprocessableEntity())
-			.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+			.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+			.andExpect(jsonPath("$.errors[0].field").value("userIds[1]"));
+		postIds(login(owner), "/api/projects/" + project.getId() + "/invitations", valid, inactive)
+			.andExpect(status().isUnprocessableEntity())
+			.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+			.andExpect(jsonPath("$.errors[0].field").value("userIds[1]"));
 		getMembers(login(valid), project)
-			.andExpect(status().isForbidden())
-			.andExpect(jsonPath("$.code").value("FORBIDDEN"));
+			.andExpect(status().isNotFound())
+			.andExpect(jsonPath("$.code").value("NOT_FOUND"));
 
 		assertThat(projectMemberMapper.existsByProjectIdAndUserId(project.getId(), valid.getId())).isFalse();
+		assertThat(projectInvitationMapper.selectByProjectIdAndInviteeIdForUpdate(
+			project.getId(), valid.getId())).isNull();
 	}
 
 	@Test
@@ -130,7 +138,8 @@ class ProjectMembershipControllerTests {
 
 		postIds(ownerSession, "/api/projects/" + project.getId() + "/invitations", invitee)
 			.andExpect(status().isConflict())
-			.andExpect(jsonPath("$.code").value("INVITATION_ALREADY_PENDING"));
+			.andExpect(jsonPath("$.code").value("INVITATION_ALREADY_PENDING"))
+			.andExpect(jsonPath("$.errors[0].field").value("userIds[0]"));
 		postIds(login(admin), "/api/projects/" + project.getId() + "/invitations", outsider)
 			.andExpect(status().isForbidden())
 			.andExpect(jsonPath("$.code").value("FORBIDDEN"));
@@ -224,20 +233,20 @@ class ProjectMembershipControllerTests {
 	}
 
 	@Test
-	void archivedProjectRejectsInvitationRejectionWithoutMutation() throws Exception {
+	void archivedProjectTakesPrecedenceOverInvalidInvitationState() throws Exception {
 		User owner = insertUser(SystemRole.USER, true);
 		User invitee = insertUser(SystemRole.USER, true);
 		Project project = insertProject(owner);
-		ProjectInvitation invitation = insertInvitation(project, invitee, owner, InvitationStatus.PENDING);
+		ProjectInvitation invitation = insertInvitation(project, invitee, owner, InvitationStatus.REJECTED);
 		project.setArchivedAt(java.time.LocalDateTime.now());
 		projectMapper.updateById(project);
 
-		respond(login(invitee), invitation.getId().toString(), InvitationStatus.REJECTED)
+		respond(login(invitee), invitation.getId().toString(), InvitationStatus.ACCEPTED)
 			.andExpect(status().isConflict())
 			.andExpect(jsonPath("$.code").value("PROJECT_ARCHIVED"));
 
 		assertThat(projectInvitationMapper.selectById(invitation.getId()).getStatus())
-			.isEqualTo(InvitationStatus.PENDING);
+			.isEqualTo(InvitationStatus.REJECTED);
 	}
 
 	@Test

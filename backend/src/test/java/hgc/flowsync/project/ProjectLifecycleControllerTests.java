@@ -136,13 +136,32 @@ class ProjectLifecycleControllerTests {
 			.andExpect(jsonPath("$.owner.id").value(owner.getId().toString()));
 		getProject(login(admin), project.getId()).andExpect(status().isOk());
 		getProject(login(outsider), project.getId())
-			.andExpect(status().isForbidden())
-			.andExpect(jsonPath("$.code").value("FORBIDDEN"));
+			.andExpect(status().isNotFound())
+			.andExpect(jsonPath("$.code").value("NOT_FOUND"));
 		getProject(login(admin), Long.MAX_VALUE)
 			.andExpect(status().isNotFound())
 			.andExpect(jsonPath("$.code").value("NOT_FOUND"));
 		mockMvc.perform(get("/api/projects/{projectId}", project.getId()))
 			.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void projectUpdateRejectsDateRangeExcludingExistingTask() throws Exception {
+		User owner = insertUser(SystemRole.USER, true);
+		Project project = insertProject(owner, "Lifecycle Date Range", null);
+		Task task = insertTask(project, owner, TaskStatus.IN_PROGRESS);
+		task.setDueDate(LocalDate.of(2026, 7, 15));
+		taskMapper.updateById(task);
+
+		update(login(owner), project, new UpdateBody(
+			project.getName(), project.getDescription(), project.getStatus(), project.getPriority(),
+			LocalDate.of(2026, 7, 16), project.getEndDate()))
+			.andExpect(status().isUnprocessableEntity())
+			.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+		Project unchanged = projectMapper.selectById(project.getId());
+		assertThat(unchanged.getStartDate()).isEqualTo(LocalDate.of(2026, 7, 1));
+		assertThat(unchanged.getEndDate()).isEqualTo(LocalDate.of(2026, 8, 31));
 	}
 
 	@Test
@@ -274,6 +293,9 @@ class ProjectLifecycleControllerTests {
 		insertMember(project, member);
 		ProjectInvitation invitation = insertInvitation(project, invitee, owner);
 		Task task = insertTask(project, member, TaskStatus.COMPLETED);
+		Task childTask = insertTask(project, member, TaskStatus.COMPLETED);
+		childTask.setParentId(task.getId());
+		taskMapper.updateById(childTask);
 		TaskLog taskLog = insertTaskLog(task, member);
 		Summary summary = insertSummary(project, task, owner);
 
@@ -291,6 +313,7 @@ class ProjectLifecycleControllerTests {
 		assertThat(summaryMapper.selectById(summary.getId())).isNull();
 		assertThat(taskLogMapper.selectById(taskLog.getId())).isNull();
 		assertThat(taskMapper.selectById(task.getId())).isNull();
+		assertThat(taskMapper.selectById(childTask.getId())).isNull();
 		assertThat(projectInvitationMapper.selectById(invitation.getId())).isNull();
 		assertThat(projectMemberMapper.selectCount(
 			com.baomidou.mybatisplus.core.toolkit.Wrappers.<ProjectMember>lambdaQuery()

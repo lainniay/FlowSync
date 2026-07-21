@@ -99,7 +99,9 @@ class ProjectAccessServiceTests {
 			.doesNotThrowAnyException();
 		assertThatCode(() -> projectAccessService.requireMemberOrAdmin(project, admin))
 			.doesNotThrowAnyException();
-		forbidden(() -> projectAccessService.requireMemberOrAdmin(project, outsider));
+		assertBusinessError(
+			() -> projectAccessService.requireMemberOrAdmin(project, outsider),
+			ErrorCode.NOT_FOUND);
 
 		assertThatCode(() -> projectAccessService.requireOwnerOrAdmin(project, owner))
 			.doesNotThrowAnyException();

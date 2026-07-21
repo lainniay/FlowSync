@@ -115,6 +115,17 @@ class AuthControllerTests {
 	}
 
 	@Test
+	void emptyPasswordIsAnInvalidCredential() throws Exception {
+		User user = insertUser(true);
+
+		login(newSession(), user.getUsername(), "")
+			.andExpect(status().isUnauthorized())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
+			.andExpect(jsonPath("$.errors").isEmpty());
+	}
+
+	@Test
 	void loginRejectsPasswordBeyondBcryptByteLimit() throws Exception {
 		User user = insertUser(true);
 		user.setPasswordHash(passwordEncoder.encode("a".repeat(72)));

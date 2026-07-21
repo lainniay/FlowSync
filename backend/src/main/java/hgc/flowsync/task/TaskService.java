@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import hgc.flowsync.common.api.PageResponse;
@@ -21,12 +22,15 @@ import hgc.flowsync.user.CurrentUserService;
 import hgc.flowsync.user.SystemRole;
 import hgc.flowsync.user.User;
 import hgc.flowsync.user.UserMapper;
+import hgc.flowsync.user.UserWriteLockService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class TaskService {
@@ -44,7 +48,8 @@ public class TaskService {
 	private final CurrentUserService currentUserService;
 	private final ProjectAccessService projectAccessService;
 	private final TaskAccessService taskAccessService;
-	private final TaskWriteLockService taskWriteLockService;
+	private final UserWriteLockService userWriteLockService;
+	private final TransactionTemplate transactionTemplate;
 
 	public TaskService(
 		TaskMapper taskMapper,
@@ -55,7 +60,8 @@ public class TaskService {
 		CurrentUserService currentUserService,
 		ProjectAccessService projectAccessService,
 		TaskAccessService taskAccessService,
-		TaskWriteLockService taskWriteLockService) {
+		UserWriteLockService userWriteLockService,
+		PlatformTransactionManager transactionManager) {
 		this.taskMapper = taskMapper;
 		this.taskLogMapper = taskLogMapper;
 		this.summaryMapper = summaryMapper;
@@ -64,7 +70,8 @@ public class TaskService {
 		this.currentUserService = currentUserService;
 		this.projectAccessService = projectAccessService;
 		this.taskAccessService = taskAccessService;
-		this.taskWriteLockService = taskWriteLockService;
+		this.userWriteLockService = userWriteLockService;
+		this.transactionTemplate = new TransactionTemplate(transactionManager);
 	}
 
 	@Transactional(readOnly = true)
@@ -141,8 +148,8 @@ public class TaskService {
 		long projectId = parseId(requestedProjectId);
 		User currentUser = currentUserService.require(authentication);
 		Long assigneeId = parseNullableId(requestedAssigneeId);
-		TaskWriteLockService.LockedUsers lockedUsers =
-			taskWriteLockService.lockUsers(currentUser, assigneeId);
+		UserWriteLockService.LockedUsers lockedUsers =
+			userWriteLockService.lockUsers(currentUser, assigneeId);
 		TaskAccessService.ProjectContext context =
 			taskAccessService.requireCreatable(authentication, projectId);
 		Long parentId = validateParent(context.project(), null, requestedParentId);
@@ -176,8 +183,8 @@ public class TaskService {
 		LocalDate dueDate) {
 		User currentUser = currentUserService.require(authentication);
 		Long assigneeId = parseNullableId(requestedAssigneeId);
-		TaskWriteLockService.LockedUsers lockedUsers =
-			taskWriteLockService.lockUsers(currentUser, assigneeId);
+		UserWriteLockService.LockedUsers lockedUsers =
+			userWriteLockService.lockUsers(currentUser, assigneeId);
 		TaskAccessService.TaskContext context =
 			taskAccessService.requireOwnerWritable(authentication, taskId);
 		Long parentId = validateParent(context.project(), taskId, requestedParentId);
@@ -196,18 +203,39 @@ public class TaskService {
 		return responses(List.of(taskMapper.selectById(taskId))).getFirst();
 	}
 
-	@Transactional
 	public TaskResponse updateStatus(
+		Authentication authentication,
+		Long taskId,
+		TaskStatus status) {
+		for (int attempt = 0; attempt < 3; attempt++) {
+			try {
+				return transactionTemplate.execute(transaction ->
+					updateStatusOnce(authentication, taskId, status));
+			} catch (StaleTaskAssigneeException exception) {
+				if (attempt == 2) {
+					throw new BusinessException(ErrorCode.VALIDATION_ERROR);
+				}
+			}
+		}
+		throw new IllegalStateException("Unreachable");
+	}
+
+	private TaskResponse updateStatusOnce(
 		Authentication authentication,
 		Long taskId,
 		TaskStatus status) {
 		User currentUser = currentUserService.require(authentication);
 		Task snapshot = taskId == null ? null : taskMapper.selectById(taskId);
-		TaskWriteLockService.LockedUsers lockedUsers = taskWriteLockService.lockUsers(
+		UserWriteLockService.LockedUsers lockedUsers = userWriteLockService.lockUsers(
 			currentUser,
 			snapshot == null ? null : snapshot.getAssigneeId());
 		TaskAccessService.TaskContext context =
 			taskAccessService.requireStatusWritable(authentication, taskId);
+		if (!Objects.equals(
+			snapshot == null ? null : snapshot.getAssigneeId(),
+			context.task().getAssigneeId())) {
+			throw new StaleTaskAssigneeException();
+		}
 		if (isTerminal(context.task().getStatus()) && !isTerminal(status)) {
 			validateReopenedAssignee(context.project(), context.task().getAssigneeId(), lockedUsers);
 		}
@@ -215,6 +243,9 @@ public class TaskService {
 			.eq(Task::getId, taskId)
 			.set(Task::getStatus, status));
 		return responses(List.of(taskMapper.selectById(taskId))).getFirst();
+	}
+
+	private static final class StaleTaskAssigneeException extends RuntimeException {
 	}
 
 	@Transactional
@@ -241,7 +272,7 @@ public class TaskService {
 	private void validateAssignee(
 		Project project,
 		Long assigneeId,
-		TaskWriteLockService.LockedUsers lockedUsers) {
+		UserWriteLockService.LockedUsers lockedUsers) {
 		if (assigneeId == null) {
 			return;
 		}
@@ -257,7 +288,7 @@ public class TaskService {
 	private void validateReopenedAssignee(
 		Project project,
 		Long assigneeId,
-		TaskWriteLockService.LockedUsers lockedUsers) {
+		UserWriteLockService.LockedUsers lockedUsers) {
 		if (assigneeId != null) {
 			User assignee = lockedUsers.user(assigneeId);
 			if (assignee == null || !isValidAssignee(project, assignee)) {
@@ -269,7 +300,8 @@ public class TaskService {
 	private boolean isValidAssignee(Project project, User assignee) {
 		return assignee.isActive()
 			&& assignee.getSystemRole() == SystemRole.USER
-			&& projectMemberMapper.existsByProjectIdAndUserId(project.getId(), assignee.getId());
+			&& projectMemberMapper.existsByProjectIdAndUserIdForUpdate(
+				project.getId(), assignee.getId());
 	}
 
 	private Long validateParent(Project project, Long taskId, String requestedParentId) {
@@ -286,7 +318,7 @@ public class TaskService {
 			if (!visited.add(candidateId) || candidateId.equals(taskId)) {
 				throw new BusinessException(ErrorCode.VALIDATION_ERROR);
 			}
-			Task candidate = taskMapper.selectById(candidateId);
+			Task candidate = taskMapper.selectByIdForUpdate(candidateId);
 			if (candidate == null || !candidate.getProjectId().equals(project.getId())) {
 				throw new BusinessException(ErrorCode.NOT_FOUND);
 			}

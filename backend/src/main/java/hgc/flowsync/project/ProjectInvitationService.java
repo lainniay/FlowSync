@@ -1,6 +1,7 @@
 package hgc.flowsync.project;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -12,6 +13,7 @@ import hgc.flowsync.user.CurrentUserService;
 import hgc.flowsync.user.SystemRole;
 import hgc.flowsync.user.User;
 import hgc.flowsync.user.UserMapper;
+import hgc.flowsync.user.UserWriteLockService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.core.Authentication;
@@ -26,18 +28,21 @@ public class ProjectInvitationService {
 	private final UserMapper userMapper;
 	private final CurrentUserService currentUserService;
 	private final ProjectAccessService projectAccessService;
+	private final UserWriteLockService userWriteLockService;
 
 	public ProjectInvitationService(
 		ProjectInvitationMapper projectInvitationMapper,
 		ProjectMemberMapper projectMemberMapper,
 		UserMapper userMapper,
 		CurrentUserService currentUserService,
-		ProjectAccessService projectAccessService) {
+		ProjectAccessService projectAccessService,
+		UserWriteLockService userWriteLockService) {
 		this.projectInvitationMapper = projectInvitationMapper;
 		this.projectMemberMapper = projectMemberMapper;
 		this.userMapper = userMapper;
 		this.currentUserService = currentUserService;
 		this.projectAccessService = projectAccessService;
+		this.userWriteLockService = userWriteLockService;
 	}
 
 	@Transactional
@@ -45,37 +50,50 @@ public class ProjectInvitationService {
 		Authentication authentication,
 		Long projectId,
 		List<String> requestedUserIds) {
-		User currentUser = currentUserService.requireForUpdate(authentication);
+		List<Long> userIds = parseDistinctIds(requestedUserIds);
+		User requestedBy = currentUserService.require(authentication);
+		UserWriteLockService.LockedUsers lockedUsers = userWriteLockService.lockUsers(
+			requestedBy, userIds.toArray(Long[]::new));
+		User currentUser = lockedUsers.currentUser();
 		Project project = projectAccessService.requireProjectForUpdate(projectId);
 		projectAccessService.requireOwner(project, currentUser);
 		projectAccessService.requireUnarchived(project);
 
-		List<Long> userIds = parseDistinctIds(requestedUserIds);
-		Map<Long, User> users = users(userIds);
+		Map<Long, User> users = new HashMap<>();
+		userIds.forEach(userId -> users.put(userId, lockedUsers.user(userId)));
 		Map<Long, ProjectInvitation> existing = new HashMap<>();
-		for (Long userId : userIds) {
+		for (int index = 0; index < userIds.size(); index++) {
+			Long userId = userIds.get(index);
 			User user = users.get(userId);
-			if (!user.isActive() || user.getSystemRole() != SystemRole.USER) {
-				throw new BusinessException(ErrorCode.VALIDATION_ERROR);
+			String field = userIdField(index);
+			if (user == null) {
+				throw new BusinessException(ErrorCode.NOT_FOUND, field);
 			}
-			if (projectMemberMapper.existsByProjectIdAndUserId(projectId, userId)) {
-				throw new BusinessException(ErrorCode.MEMBER_ALREADY_EXISTS);
+			if (!user.isActive() || user.getSystemRole() != SystemRole.USER) {
+				throw new BusinessException(ErrorCode.VALIDATION_ERROR, field);
+			}
+			if (projectMemberMapper.existsByProjectIdAndUserIdForUpdate(projectId, userId)) {
+				throw new BusinessException(ErrorCode.MEMBER_ALREADY_EXISTS, field);
 			}
 			ProjectInvitation invitation = projectInvitationMapper
 				.selectByProjectIdAndInviteeIdForUpdate(projectId, userId);
 			if (invitation != null && invitation.getStatus() == InvitationStatus.PENDING) {
-				throw new BusinessException(ErrorCode.INVITATION_ALREADY_PENDING);
+				throw new BusinessException(ErrorCode.INVITATION_ALREADY_PENDING, field);
 			}
 			existing.put(userId, invitation);
 		}
 
-		try {
-			return userIds.stream()
-				.map(userId -> save(project, users.get(userId), currentUser, existing.get(userId)))
-				.toList();
-		} catch (DuplicateKeyException exception) {
-			throw new BusinessException(ErrorCode.INVITATION_ALREADY_PENDING);
+		List<ProjectInvitationResponse> invitations = new ArrayList<>(userIds.size());
+		for (int index = 0; index < userIds.size(); index++) {
+			Long userId = userIds.get(index);
+			try {
+				invitations.add(save(project, users.get(userId), currentUser, existing.get(userId)));
+			} catch (DuplicateKeyException exception) {
+				throw new BusinessException(
+					ErrorCode.INVITATION_ALREADY_PENDING, userIdField(index));
+			}
 		}
+		return List.copyOf(invitations);
 	}
 
 	@Transactional(readOnly = true)
@@ -142,8 +160,8 @@ public class ProjectInvitationService {
 		if (!invitation.getInviteeId().equals(currentUser.getId())) {
 			throw new BusinessException(ErrorCode.FORBIDDEN);
 		}
-		requirePending(invitation);
 		projectAccessService.requireUnarchived(project);
+		requirePending(invitation);
 
 		if (status == InvitationStatus.ACCEPTED) {
 			if (projectMemberMapper.existsByProjectIdAndUserId(project.getId(), currentUser.getId())) {
@@ -194,23 +212,21 @@ public class ProjectInvitationService {
 			userMapper.selectById(invitation.getInvitedBy()));
 	}
 
-	private Map<Long, User> users(List<Long> userIds) {
-		Map<Long, User> users = new HashMap<>();
-		userMapper.selectList(Wrappers.<User>lambdaQuery()
-			.in(User::getId, userIds)
-			.last("FOR UPDATE")).forEach(user -> users.put(user.getId(), user));
-		if (users.size() != userIds.size()) {
-			throw new BusinessException(ErrorCode.NOT_FOUND);
+	private static List<Long> parseDistinctIds(List<String> requestedUserIds) {
+		List<Long> userIds = new ArrayList<>(requestedUserIds.size());
+		HashSet<Long> seen = new HashSet<>();
+		for (int index = 0; index < requestedUserIds.size(); index++) {
+			Long userId = Long.parseLong(requestedUserIds.get(index));
+			if (!seen.add(userId)) {
+				throw new BusinessException(ErrorCode.VALIDATION_ERROR, userIdField(index));
+			}
+			userIds.add(userId);
 		}
-		return users;
+		return List.copyOf(userIds);
 	}
 
-	private static List<Long> parseDistinctIds(List<String> requestedUserIds) {
-		List<Long> userIds = requestedUserIds.stream().map(Long::parseLong).toList();
-		if (new HashSet<>(userIds).size() != userIds.size()) {
-			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
-		}
-		return userIds;
+	private static String userIdField(int index) {
+		return "userIds[" + index + "]";
 	}
 
 	private static void requirePending(ProjectInvitation invitation) {

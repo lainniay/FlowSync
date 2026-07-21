@@ -43,7 +43,10 @@
 - [x] `UserService` 产生 `USERNAME_ALREADY_EXISTS`。
 - [x] 项目、成员和邀请 Service 产生 `docs/api.md` 定义的对应 `409` 业务错误码。
   - 已完成成员直接添加、邀请创建、邀请状态转换、成员移除和项目永久删除。
-- [ ] AI 集成产生 `RATE_LIMITED` 和 `AI_PROVIDER_ERROR`，且不把 AI 提供商的原始异常返回客户端。
+- [x] 实现 `POST /api/projects/{projectId}/ai/task-plans/imports`，只持久化 owner 人工审阅后
+  确认的 Task，并保证批量校验和写入事务性。
+- [ ] AI Provider 集成实现任务建议和任务计划生成，产生 `RATE_LIMITED` 和
+  `AI_PROVIDER_ERROR`，且不把 AI 提供商的原始异常返回客户端。
 
 - [x] 实现 `PUT /api/users/{userId}`。
   - 前置条件：先完成 Project、ProjectMember、ProjectInvitation 和 Task 的基础查询，才能检查项目
