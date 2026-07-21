@@ -29,6 +29,7 @@ import 'element-plus/es/components/tag/style/css'
 import { getApiErrorMessage, hasApiStatus } from '@/shared/api/errors'
 import type { SummaryType } from '@/shared/api/types'
 import { useAuthStore } from '@/stores/auth'
+import { getProject } from '@/views/projects/api'
 
 import {
   deleteSummary,
@@ -67,12 +68,20 @@ const loaded = ref(false)
 const errorMessage = ref('')
 const notFound = ref(false)
 
+// --- Project owner ---
+const projectOwner = ref<{ id: string; displayName: string } | null>(null)
+
 // --- Permissions ---
 const isAdmin = computed(() => authStore.currentUser?.systemRole === 'ADMIN')
 const isCreator = computed(() =>
   summary.value?.createdBy.id === authStore.currentUser?.id,
 )
-const canModify = computed(() => !isAdmin.value && isCreator.value)
+const isProjectOwner = computed(() =>
+  projectOwner.value?.id === authStore.currentUser?.id,
+)
+const canModify = computed(
+  () => !isAdmin.value && (isCreator.value || isProjectOwner.value),
+)
 
 async function fetchSummary(): Promise<void> {
   loading.value = true
@@ -81,6 +90,14 @@ async function fetchSummary(): Promise<void> {
 
   try {
     summary.value = await getSummary(summaryId.value)
+
+    // Fetch project owner for permission checks
+    try {
+      const project = await getProject(summary.value.projectId)
+      projectOwner.value = project.owner
+    } catch {
+      projectOwner.value = null
+    }
   } catch (error) {
     if (hasApiStatus(error, 404)) {
       notFound.value = true

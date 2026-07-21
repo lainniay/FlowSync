@@ -4,6 +4,7 @@ import {
   onMounted,
   reactive,
   ref,
+  watch,
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -11,8 +12,11 @@ import {
   ElButton,
   ElDialog,
   ElEmpty,
+  ElForm,
+  ElFormItem,
   ElInput,
   ElInputNumber,
+  ElLoading,
   ElMessage,
   ElMessageBox,
   ElOption,
@@ -29,8 +33,11 @@ import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/date-picker/style/css'
 import 'element-plus/es/components/dialog/style/css'
 import 'element-plus/es/components/empty/style/css'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
 import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/input-number/style/css'
+import 'element-plus/es/components/loading/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/select/style/css'
@@ -39,12 +46,15 @@ import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
 
+const vLoading = ElLoading.directive
+
 import { getApiErrorMessage, hasApiStatus } from '@/shared/api/errors'
 import type {
   Priority,
   TaskStatus,
 } from '@/shared/api/types'
 import { useAuthStore } from '@/stores/auth'
+import { getProject } from '@/views/projects/api'
 
 import {
   createTaskLog,
@@ -113,6 +123,9 @@ const taskLoaded = ref(false)
 const taskError = ref('')
 const notFound = ref(false)
 
+// --- Project owner ---
+const projectOwner = ref<{ id: string; displayName: string } | null>(null)
+
 // --- Logs ---
 const logs = ref<TaskLog[]>([])
 const logPage = ref(0)
@@ -125,12 +138,22 @@ const isAdmin = computed(() => authStore.currentUser?.systemRole === 'ADMIN')
 const isAssignee = computed(() =>
   task.value?.assignee?.id === authStore.currentUser?.id,
 )
-const canEdit = computed(() => !isAdmin.value)
-const canChangeStatus = computed(() => !isAdmin.value)
-const canCreateLog = computed(() => !isAdmin.value)
-const canUseAi = computed(() => !isAdmin.value && isAssignee.value)
+const isProjectOwner = computed(() =>
+  projectOwner.value?.id === authStore.currentUser?.id,
+)
+const canEdit = computed(() => !isAdmin.value && isProjectOwner.value)
+const canChangeStatus = computed(
+  () => !isAdmin.value && (isProjectOwner.value || isAssignee.value),
+)
+const canCreateLog = computed(
+  () => !isAdmin.value && (isProjectOwner.value || isAssignee.value),
+)
+const canUseAi = computed(
+  () => !isAdmin.value && (isProjectOwner.value || isAssignee.value),
+)
 const canDeleteLog = (log: TaskLog): boolean =>
-  !isAdmin.value && (log.operator.id === authStore.currentUser?.id)
+  !isAdmin.value
+  && (isProjectOwner.value || log.operator.id === authStore.currentUser?.id)
 
 // --- Fetch task ---
 async function fetchTask(): Promise<void> {
@@ -141,6 +164,14 @@ async function fetchTask(): Promise<void> {
   try {
     const result = await getTask(taskId.value)
     task.value = result
+
+    // Fetch project owner for permission checks
+    try {
+      const project = await getProject(result.projectId)
+      projectOwner.value = project.owner
+    } catch {
+      projectOwner.value = null
+    }
 
     if (result.parentId) {
       try {
@@ -446,10 +477,41 @@ function formatDateTime(value: string): string {
   })
 }
 
+// --- Reset & reload on route change ---
+function resetDetailState(): void {
+  editDialogVisible.value = false
+  statusDialogVisible.value = false
+  deleteDialogVisible.value = false
+  addLogDialogVisible.value = false
+  aiSuggestion.value = ''
+  task.value = null
+  parentTask.value = null
+  childTasks.value = []
+  taskError.value = ''
+  notFound.value = false
+  taskLoaded.value = false
+  projectOwner.value = null
+  logs.value = []
+  logPage.value = 0
+  logTotalElements.value = 0
+}
+
+async function loadDetailData(): Promise<void> {
+  resetDetailState()
+  await fetchTask()
+  await fetchLogs()
+}
+
 onMounted(() => {
-  void fetchTask()
-  void fetchLogs()
+  void loadDetailData()
 })
+
+watch(
+  () => route.params.taskId,
+  () => {
+    void loadDetailData()
+  },
+)
 </script>
 
 <template>

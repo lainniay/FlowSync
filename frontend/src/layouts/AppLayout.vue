@@ -28,11 +28,9 @@ const authStore = useAuthStore()
 
 const adminMenu: readonly MenuItem[] = [
   { label: '工作台', path: '/overview' },
-  { label: '用户管理', path: '/admin/users' },
   { label: '项目', path: '/projects' },
   { label: '任务', path: '/tasks' },
   { label: '总结', path: '/summaries' },
-  { label: '个人中心', path: '/profile' },
 ]
 
 const userMenu: readonly MenuItem[] = [
@@ -40,8 +38,6 @@ const userMenu: readonly MenuItem[] = [
   { label: '项目', path: '/projects' },
   { label: '任务', path: '/tasks' },
   { label: '总结', path: '/summaries' },
-  { label: '收到的邀请', path: '/invitations' },
-  { label: '个人中心', path: '/profile' },
 ]
 
 const menuItems = computed(() => (

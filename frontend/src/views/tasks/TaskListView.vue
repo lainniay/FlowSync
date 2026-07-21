@@ -5,6 +5,7 @@ import {
   reactive,
   ref,
 } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   ElAlert,
   ElButton,
@@ -46,6 +47,7 @@ import type {
   TaskStatus,
 } from '@/shared/api/types'
 import { useAuthStore } from '@/stores/auth'
+import { getProject } from '@/views/projects/api'
 
 import {
   createTask,
@@ -72,6 +74,7 @@ type TagType =
   | 'danger'
   | 'info'
 
+const route = useRoute()
 const authStore = useAuthStore()
 
 const statusLabels: Record<TaskStatus, string> = {
@@ -103,9 +106,14 @@ const priorityTagTypes: Record<Priority, TagType> = {
 }
 
 function createInitialFilters(): TaskListFilters {
+  const queryProjectId =
+    typeof route?.query?.projectId === 'string'
+      ? route.query.projectId
+      : ''
+
   return {
     q: '',
-    projectId: '',
+    projectId: queryProjectId,
     assigneeId: '',
     status: '',
     priority: '',
@@ -219,7 +227,10 @@ async function handleSearch(): Promise<void> {
   }
 
   page.value = 0
-  await loadTasks()
+  await Promise.all([
+    loadTasks(),
+    checkCreatePermission(appliedFilters.value.projectId),
+  ])
 }
 
 async function handleReset(): Promise<void> {
@@ -263,7 +274,7 @@ const defaultCreateForm: {
   priority: Priority
   dueDate: string
 } = {
-  projectId: '101',
+  projectId: '',
   parentId: '',
   title: '',
   description: '',
@@ -288,8 +299,35 @@ const createRules: FormRules = {
   ],
 }
 
+// --- Create permission ---
+const createProjectOwnerId = ref<string | null>(null)
+
+async function checkCreatePermission(projectId: string): Promise<void> {
+  if (!projectId) {
+    createProjectOwnerId.value = null
+    return
+  }
+  try {
+    const project = await getProject(projectId)
+    createProjectOwnerId.value = project.owner.id
+  } catch {
+    createProjectOwnerId.value = null
+  }
+}
+
+const canCreateTask = computed(() => {
+  if (authStore.currentUser?.systemRole !== 'USER') return false
+  const pid = appliedFilters.value.projectId
+  if (!pid) return false
+  return createProjectOwnerId.value === authStore.currentUser?.id
+})
+
 function openCreateDialog(): void {
-  Object.assign(createForm, defaultCreateForm)
+  const prefilled = {
+    ...defaultCreateForm,
+    projectId: appliedFilters.value.projectId || '',
+  }
+  Object.assign(createForm, prefilled)
   createDialogVisible.value = true
 }
 
@@ -337,8 +375,12 @@ function formatDateTime(value: string): string {
   })
 }
 
-onMounted(() => {
-  void loadTasks()
+onMounted(async () => {
+  const pid = appliedFilters.value.projectId
+  await Promise.all([
+    loadTasks(),
+    pid ? checkCreatePermission(pid) : Promise.resolve(),
+  ])
 })
 </script>
 
@@ -354,7 +396,7 @@ onMounted(() => {
 
       <div class="header-actions">
         <el-button
-          v-if="authStore.currentUser?.systemRole === 'USER'"
+          v-if="canCreateTask"
           type="primary"
           @click="openCreateDialog"
         >
