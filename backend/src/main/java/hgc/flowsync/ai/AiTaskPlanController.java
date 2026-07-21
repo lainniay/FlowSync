@@ -1,6 +1,7 @@
 package hgc.flowsync.ai;
 
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.List;
 
 import hgc.flowsync.project.Priority;
@@ -10,6 +11,8 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
@@ -24,9 +27,21 @@ import org.springframework.web.bind.annotation.RestController;
 public class AiTaskPlanController {
 
 	private final AiTaskPlanImportService importService;
+	private final AiGenerationService generationService;
 
-	public AiTaskPlanController(AiTaskPlanImportService importService) {
+	public AiTaskPlanController(
+		AiTaskPlanImportService importService,
+		AiGenerationService generationService) {
 		this.importService = importService;
+		this.generationService = generationService;
+	}
+
+	@PostMapping("/api/projects/{projectId}/ai/task-plans")
+	AiTaskPlanResponse generatePlan(
+		Authentication authentication,
+		@PathVariable Long projectId,
+		@Valid @RequestBody AiTaskPlanGenerateRequest body) {
+		return generationService.generatePlan(authentication, projectId, body);
 	}
 
 	@PostMapping("/api/projects/{projectId}/ai/task-plans/imports")
@@ -45,8 +60,8 @@ record AiTaskPlanImportRequest(
 }
 
 record AiTaskPlanItem(
-	@JsonProperty(required = true) @NotBlank String draftId,
-	@JsonProperty(required = true) String parentDraftId,
+	@JsonProperty(required = true) @NotBlank @Size(max = 100) String draftId,
+	@JsonProperty(required = true) @Size(max = 100) String parentDraftId,
 	@JsonProperty(required = true) @NotBlank @Size(max = 100) String title,
 	@JsonProperty(required = true) @Size(max = 5000) String description,
 	@JsonProperty(required = true) @NotNull Priority priority,
@@ -55,4 +70,18 @@ record AiTaskPlanItem(
 }
 
 record AiTaskPlanImportResponse(int importedCount, List<TaskResponse> tasks) {
+}
+
+record AiTaskPlanGenerateRequest(
+	@JsonProperty(required = true) @NotBlank @Size(max = 500) String goal,
+	@Size(max = 5000) String description,
+	@Valid AiTaskPlanConstraints constraints) {
+}
+
+record AiTaskPlanConstraints(
+	@Min(1) @Max(20) Integer maxItems,
+	LocalDate targetEndDate) {
+}
+
+record AiTaskPlanResponse(String overview, List<AiTaskPlanItem> items, Instant generatedAt) {
 }
