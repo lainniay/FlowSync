@@ -31,16 +31,16 @@ const adminMenu: readonly MenuItem[] = [
   { label: '工作台', path: '/overview' },
   { label: '用户管理', path: '/admin/users' },
   { label: '项目', path: '/projects' },
-  { label: '任务', path: '/tasks', disabled: true },
-  { label: '总结', path: '/summaries', disabled: true },
+  { label: '任务', path: '/tasks' },
+  { label: '总结', path: '/summaries' },
   { label: '个人中心', path: '/profile' },
 ]
 
 const userMenu: readonly MenuItem[] = [
   { label: '工作台', path: '/overview' },
   { label: '项目', path: '/projects' },
-  { label: '任务', path: '/tasks', disabled: true },
-  { label: '总结', path: '/summaries', disabled: true },
+  { label: '任务', path: '/tasks' },
+  { label: '总结', path: '/summaries' },
   { label: '收到的邀请', path: '/invitations' },
   { label: '个人中心', path: '/profile' },
 ]
@@ -62,6 +62,14 @@ const activeMenu = computed(() => {
 
   if (route.path.startsWith('/invitations')) {
     return '/invitations'
+  }
+
+  if (route.path.startsWith('/tasks')) {
+    return '/tasks'
+  }
+
+  if (route.path.startsWith('/summaries')) {
+    return '/summaries'
   }
 
   return route.path === '/'
