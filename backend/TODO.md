@@ -31,7 +31,7 @@
   - 批量操作：必须放在同一个事务中；任意一条失败时，整批回滚，不能部分成功。
   - 已完成：`ProjectMemberService` 转换 `MEMBER_ALREADY_EXISTS`，
     `ProjectInvitationService` 转换 `INVITATION_ALREADY_PENDING`，成员和邀请批量写入已使用事务。
-  - 已完成：成员移除和项目永久删除转换 `DataIntegrityViolationException`，并覆盖引用阻止删除与
+  - 已完成：任务删除和项目永久删除转换 `DataIntegrityViolationException`，并覆盖引用阻止删除与
     事务回滚测试。
   - 完成标准：上述重复写入均返回约定的 `409` Problem Details；未识别的数据库故障仍返回
     `500 INTERNAL_SERVER_ERROR`；批量失败后数据库没有残留的部分写入。
