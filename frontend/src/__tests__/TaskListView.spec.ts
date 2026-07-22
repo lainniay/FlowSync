@@ -12,6 +12,15 @@ vi.mock('@/views/tasks/api', () => ({
   getTasks: vi.fn<typeof getTasks>(),
 }))
 
+vi.mock('vue-router', () => ({
+  useRoute: () => ({
+    query: {},
+  }),
+  useRouter: () => ({
+    push: vi.fn<() => Promise<void>>(),
+  }),
+}))
+
 const task = {
   id: '501',
   projectId: '101',

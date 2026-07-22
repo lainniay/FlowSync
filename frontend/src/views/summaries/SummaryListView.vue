@@ -5,7 +5,7 @@ import {
   reactive,
   ref,
 } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   ElAlert,
   ElButton,
@@ -70,6 +70,7 @@ type TagType =
 
 const authStore = useAuthStore()
 const route = useRoute()
+const router = useRouter()
 
 const typeLabels: Record<SummaryType, string> = {
   STAGE: '阶段总结',
@@ -275,6 +276,13 @@ async function handleCreate(): Promise<void> {
   } finally {
     createSubmitting.value = false
   }
+}
+
+function goToSummary(summaryId: string): void {
+  void router.push({
+    name: 'summary-detail',
+    params: { summaryId },
+  })
 }
 
 function truncateContent(content: string, maxLength = 60): string {
@@ -494,13 +502,19 @@ defineExpose({
             </template>
           </el-table-column>
 
-          <el-table-column label="操作" width="80">
+          <el-table-column
+            fixed="right"
+            label="操作"
+            width="100"
+          >
             <template #default="{ row }">
-              <router-link
-                :to="`/summaries/${row.id}`"
+              <el-button
+                link
+                type="primary"
+                @click="goToSummary((row as Summary).id)"
               >
                 查看
-              </router-link>
+              </el-button>
             </template>
           </el-table-column>
 

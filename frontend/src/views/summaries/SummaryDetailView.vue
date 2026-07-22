@@ -187,6 +187,10 @@ function formatDateTime(value: string): string {
   })
 }
 
+function goBack(): void {
+  void router.push({ name: 'summaries' })
+}
+
 onMounted(() => {
   void fetchSummary()
 })
@@ -236,16 +240,15 @@ onMounted(() => {
     </template>
 
     <template v-else-if="summary">
-      <!-- Breadcrumb -->
-      <nav class="breadcrumb">
-        <router-link :to="{ name: 'summaries' }">总结列表</router-link>
-        <span> &gt; </span>
-        <span>总结详情</span>
-      </nav>
-
-      <!-- Header -->
       <header class="page-header">
         <div>
+          <p class="breadcrumb">
+            <RouterLink :to="{ name: 'summaries' }">
+              总结
+            </RouterLink>
+            <span>/</span>
+            <span>{{ typeLabels[summary.type] }}</span>
+          </p>
           <h1>
             {{ typeLabels[summary.type] }}
           </h1>
@@ -391,6 +394,16 @@ onMounted(() => {
         </template>
       </el-dialog>
     </template>
+
+    <footer class="page-footer">
+      <el-button
+        class="back-button"
+        type="primary"
+        @click="goBack"
+      >
+        返回
+      </el-button>
+    </footer>
   </section>
 </template>
 
@@ -401,17 +414,17 @@ onMounted(() => {
 }
 
 .breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
   color: var(--fs-color-text-secondary, #64748b);
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .breadcrumb a {
   color: var(--fs-color-primary, #2563eb);
   text-decoration: none;
-}
-
-.breadcrumb a:hover {
-  text-decoration: underline;
 }
 
 .page-header {
@@ -439,6 +452,17 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.page-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.back-button {
+  height: 43px;
+  padding: 0 20px;
+  font-size: 19px;
 }
 
 .content-panel {

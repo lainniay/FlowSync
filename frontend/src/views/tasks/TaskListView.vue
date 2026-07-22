@@ -5,7 +5,7 @@ import {
   reactive,
   ref,
 } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   ElAlert,
   ElButton,
@@ -75,6 +75,7 @@ type TagType =
   | 'info'
 
 const route = useRoute()
+const router = useRouter()
 const authStore = useAuthStore()
 
 const statusLabels: Record<TaskStatus, string> = {
@@ -370,6 +371,13 @@ async function handleCreate(): Promise<void> {
   }
 }
 
+function goToTask(taskId: string): void {
+  void router.push({
+    name: 'task-detail',
+    params: { taskId },
+  })
+}
+
 function formatDateTime(value: string): string {
   return new Date(value).toLocaleString('zh-CN', {
     year: 'numeric',
@@ -638,13 +646,19 @@ onMounted(async () => {
             </template>
           </el-table-column>
 
-          <el-table-column label="操作" width="80">
+          <el-table-column
+            fixed="right"
+            label="操作"
+            width="100"
+          >
             <template #default="{ row }">
-              <router-link
-                :to="`/tasks/${row.id}`"
+              <el-button
+                link
+                type="primary"
+                @click="goToTask((row as Task).id)"
               >
                 查看
-              </router-link>
+              </el-button>
             </template>
           </el-table-column>
 

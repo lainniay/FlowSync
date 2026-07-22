@@ -527,6 +527,10 @@ async function loadDetailData(): Promise<void> {
   await fetchLogs()
 }
 
+function goBack(): void {
+  void router.push({ name: 'tasks' })
+}
+
 onMounted(() => {
   void loadDetailData()
 })
@@ -583,16 +587,15 @@ watch(
     </template>
 
     <template v-else-if="task">
-      <!-- Breadcrumb -->
-      <nav class="breadcrumb">
-        <router-link :to="{ name: 'tasks' }">任务列表</router-link>
-        <span> &gt; </span>
-        <span>任务详情</span>
-      </nav>
-
-      <!-- Header -->
       <header class="page-header">
         <div>
+          <p class="breadcrumb">
+            <RouterLink :to="{ name: 'tasks' }">
+              任务
+            </RouterLink>
+            <span>/</span>
+            <span>{{ task.title }}</span>
+          </p>
           <h1>{{ task.title }}</h1>
           <div class="task-meta">
             <span>项目 {{ task.projectId }}</span>
@@ -1082,6 +1085,16 @@ watch(
         </template>
       </el-dialog>
     </template>
+
+    <footer class="page-footer">
+      <el-button
+        class="back-button"
+        type="primary"
+        @click="goBack"
+      >
+        返回
+      </el-button>
+    </footer>
   </section>
 </template>
 
@@ -1092,17 +1105,17 @@ watch(
 }
 
 .breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
   color: var(--fs-color-text-secondary, #64748b);
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .breadcrumb a {
   color: var(--fs-color-primary, #2563eb);
   text-decoration: none;
-}
-
-.breadcrumb a:hover {
-  text-decoration: underline;
 }
 
 .page-header {
@@ -1130,6 +1143,17 @@ watch(
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.page-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.back-button {
+  height: 43px;
+  padding: 0 20px;
+  font-size: 19px;
 }
 
 .content-panel {
