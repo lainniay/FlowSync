@@ -12,6 +12,12 @@ vi.mock('@/views/summaries/api', () => ({
   getSummaries: vi.fn<typeof getSummaries>(),
 }))
 
+vi.mock('vue-router', () => ({
+  useRoute: () => ({
+    query: {},
+  }),
+}))
+
 const summary = {
   id: '901',
   projectId: '101',

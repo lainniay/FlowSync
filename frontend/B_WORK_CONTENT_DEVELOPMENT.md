@@ -113,15 +113,14 @@ Router (/tasks, /tasks/:taskId, /summaries, ...)
 
 | 场景 | 判断方式 |
 |---|---|
-| ADMIN 隐藏写按钮 | `authStore.currentUser?.systemRole === 'ADMIN'` → 不渲染 |
-| 任务编辑/删除 | 非 ADMIN 即可显示（server 端校验 owner） |
-| 任务状态修改 | 非 ADMIN 即可显示（server 端校验 owner/assignee） |
-| 任务日志创建 | 非 ADMIN 即可显示 |
-| 日志删除 | 非 ADMIN 且当前用户为日志 operator |
-| AI 建议入口 | 非 ADMIN 且当前用户为任务 assignee |
-| AI 计划入口 | 非 ADMIN（在 AiTaskPlanView mounted 时二次校验） |
-| 总结编辑/删除 | 非 ADMIN 且当前用户为总结创建者 |
-| 总结创建 | 非 ADMIN |
+| ADMIN 隐藏写按钮 | `systemRole === 'ADMIN'` → 不渲染 |
+| 任务编辑/删除 | 项目 owner，且项目未归档 |
+| 任务状态修改 / 新增日志 / AI 建议 | 项目 owner 或任务 assignee，且项目未归档 |
+| 日志删除 | 项目 owner 或日志 operator，且项目未归档 |
+| AI 计划入口 | 项目 owner，且项目未归档；ADMIN 禁止 |
+| 总结编辑/删除 | 总结创建者或项目 owner，且项目未归档 |
+| 总结创建 | 非 ADMIN 的项目成员（服务端校验） |
+| 创建任务入口 | 当前筛选项目的 owner，且项目未归档 |
 
 ---
 

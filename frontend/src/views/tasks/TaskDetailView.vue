@@ -125,6 +125,7 @@ const notFound = ref(false)
 
 // --- Project owner ---
 const projectOwner = ref<{ id: string; displayName: string } | null>(null)
+const projectArchived = ref(false)
 
 // --- Logs ---
 const logs = ref<TaskLog[]>([])
@@ -132,6 +133,7 @@ const logPage = ref(0)
 const logSize = ref(20)
 const logTotalElements = ref(0)
 const logsLoading = ref(false)
+const logsError = ref('')
 
 // --- Permissions ---
 const isAdmin = computed(() => authStore.currentUser?.systemRole === 'ADMIN')
@@ -141,18 +143,26 @@ const isAssignee = computed(() =>
 const isProjectOwner = computed(() =>
   projectOwner.value?.id === authStore.currentUser?.id,
 )
-const canEdit = computed(() => !isAdmin.value && isProjectOwner.value)
+const canWriteProjectContent = computed(
+  () => !isAdmin.value && !projectArchived.value,
+)
+const canEdit = computed(
+  () => canWriteProjectContent.value && isProjectOwner.value,
+)
 const canChangeStatus = computed(
-  () => !isAdmin.value && (isProjectOwner.value || isAssignee.value),
+  () => canWriteProjectContent.value
+    && (isProjectOwner.value || isAssignee.value),
 )
 const canCreateLog = computed(
-  () => !isAdmin.value && (isProjectOwner.value || isAssignee.value),
+  () => canWriteProjectContent.value
+    && (isProjectOwner.value || isAssignee.value),
 )
 const canUseAi = computed(
-  () => !isAdmin.value && (isProjectOwner.value || isAssignee.value),
+  () => canWriteProjectContent.value
+    && (isProjectOwner.value || isAssignee.value),
 )
 const canDeleteLog = (log: TaskLog): boolean =>
-  !isAdmin.value
+  canWriteProjectContent.value
   && (isProjectOwner.value || log.operator.id === authStore.currentUser?.id)
 
 // --- Fetch task ---
@@ -169,8 +179,10 @@ async function fetchTask(): Promise<void> {
     try {
       const project = await getProject(result.projectId)
       projectOwner.value = project.owner
+      projectArchived.value = Boolean(project.archivedAt)
     } catch {
       projectOwner.value = null
+      projectArchived.value = false
     }
 
     if (result.parentId) {
@@ -211,6 +223,7 @@ async function fetchChildren(): Promise<void> {
 // --- Logs ---
 async function fetchLogs(): Promise<void> {
   logsLoading.value = true
+  logsError.value = ''
 
   try {
     const result = await getTaskLogs(taskId.value, {
@@ -220,8 +233,13 @@ async function fetchLogs(): Promise<void> {
     })
     logs.value = [...result.items]
     logTotalElements.value = result.totalElements
-  } catch {
-    // logs errors are non-critical
+  } catch (error) {
+    logs.value = []
+    logTotalElements.value = 0
+    logsError.value = getApiErrorMessage(
+      error,
+      '进度记录加载失败，请稍后重试',
+    )
   } finally {
     logsLoading.value = false
   }
@@ -441,6 +459,11 @@ async function handleAiSuggestion(): Promise<void> {
 async function handleSubmitAiAsLog(): Promise<void> {
   if (!aiSuggestion.value.trim()) return
 
+  if (aiSuggestion.value.trim().length > 1000) {
+    ElMessage.warning('进度内容不能超过 1000 个字符，请精简后再提交')
+    return
+  }
+
   aiSubmitting.value = true
 
   try {
@@ -491,7 +514,9 @@ function resetDetailState(): void {
   notFound.value = false
   taskLoaded.value = false
   projectOwner.value = null
+  projectArchived.value = false
   logs.value = []
+  logsError.value = ''
   logPage.value = 0
   logTotalElements.value = 0
 }
@@ -723,7 +748,26 @@ watch(
           </el-button>
         </div>
 
+        <el-alert
+          v-if="logsError"
+          class="logs-error"
+          :closable="false"
+          :title="logsError"
+          type="error"
+          show-icon
+        >
+          <template #default>
+            <el-button
+              size="small"
+              @click="fetchLogs"
+            >
+              重新加载
+            </el-button>
+          </template>
+        </el-alert>
+
         <el-table
+          v-else
           :data="logs"
           row-key="id"
           v-loading="logsLoading"
@@ -1093,6 +1137,10 @@ watch(
   border-radius: 8px;
   background: var(--fs-color-surface, #fff);
   padding: 20px;
+}
+
+.logs-error {
+  margin-bottom: 12px;
 }
 
 .tag-row {

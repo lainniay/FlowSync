@@ -5,6 +5,7 @@ import {
   reactive,
   ref,
 } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   ElAlert,
   ElButton,
@@ -68,6 +69,7 @@ type TagType =
   | 'info'
 
 const authStore = useAuthStore()
+const route = useRoute()
 
 const typeLabels: Record<SummaryType, string> = {
   STAGE: '阶段总结',
@@ -80,8 +82,13 @@ const typeTagTypes: Record<SummaryType, TagType> = {
 }
 
 function createInitialFilters(): SummaryListFilters {
+  const queryProjectId =
+    typeof route.query.projectId === 'string'
+      ? route.query.projectId
+      : ''
+
   return {
-    projectId: '',
+    projectId: queryProjectId,
     taskId: '',
     type: '',
     createdBy: '',
@@ -215,7 +222,7 @@ const defaultCreateForm: {
   type: SummaryType
   content: string
 } = {
-  projectId: '101',
+  projectId: '',
   taskId: '',
   type: 'STAGE',
   content: '',
@@ -233,7 +240,10 @@ const createRules: FormRules = {
 }
 
 function openCreateDialog(): void {
-  Object.assign(createForm, defaultCreateForm)
+  Object.assign(createForm, {
+    ...defaultCreateForm,
+    projectId: appliedFilters.value.projectId || '',
+  })
   createDialogVisible.value = true
 }
 
@@ -285,6 +295,11 @@ function formatDateTime(value: string): string {
 
 onMounted(() => {
   void loadSummaries()
+})
+
+defineExpose({
+  openCreateDialog,
+  createForm,
 })
 </script>
 
@@ -561,7 +576,6 @@ onMounted(() => {
         <el-form-item label="内容" prop="content">
           <el-input
             v-model="createForm.content"
-            maxlength="10000"
             placeholder="请输入总结内容"
             type="textarea"
             :rows="5"

@@ -79,7 +79,10 @@ async function verifyProjectOwner(): Promise<void> {
     isProjectOwner.value =
       project.owner.id === authStore.currentUser?.id
 
-    if (!isProjectOwner.value) {
+    if (project.archivedAt) {
+      step.value = 'forbidden'
+      errorMessage.value = '项目已归档，不能使用 AI 任务计划。'
+    } else if (!isProjectOwner.value) {
       step.value = 'forbidden'
       errorMessage.value = '只有项目 owner 才能使用 AI 任务计划。'
     } else {
@@ -349,7 +352,7 @@ function handleBackToTasks(): void {
         <label class="plan-label">补充说明</label>
         <el-input
           v-model="description"
-          maxlength="2000"
+          maxlength="5000"
           placeholder="可选，补充项目背景和特殊要求"
           type="textarea"
           :rows="2"

@@ -70,6 +70,7 @@ const notFound = ref(false)
 
 // --- Project owner ---
 const projectOwner = ref<{ id: string; displayName: string } | null>(null)
+const projectArchived = ref(false)
 
 // --- Permissions ---
 const isAdmin = computed(() => authStore.currentUser?.systemRole === 'ADMIN')
@@ -80,7 +81,9 @@ const isProjectOwner = computed(() =>
   projectOwner.value?.id === authStore.currentUser?.id,
 )
 const canModify = computed(
-  () => !isAdmin.value && (isCreator.value || isProjectOwner.value),
+  () => !isAdmin.value
+    && !projectArchived.value
+    && (isCreator.value || isProjectOwner.value),
 )
 
 async function fetchSummary(): Promise<void> {
@@ -95,8 +98,10 @@ async function fetchSummary(): Promise<void> {
     try {
       const project = await getProject(summary.value.projectId)
       projectOwner.value = project.owner
+      projectArchived.value = Boolean(project.archivedAt)
     } catch {
       projectOwner.value = null
+      projectArchived.value = false
     }
   } catch (error) {
     if (hasApiStatus(error, 404)) {
@@ -341,7 +346,6 @@ onMounted(() => {
           <el-form-item label="内容" required>
             <el-input
               v-model="editForm.content"
-              maxlength="10000"
               placeholder="请输入总结内容"
               type="textarea"
               :rows="6"

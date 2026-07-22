@@ -301,17 +301,21 @@ const createRules: FormRules = {
 
 // --- Create permission ---
 const createProjectOwnerId = ref<string | null>(null)
+const createProjectArchived = ref(false)
 
 async function checkCreatePermission(projectId: string): Promise<void> {
   if (!projectId) {
     createProjectOwnerId.value = null
+    createProjectArchived.value = false
     return
   }
   try {
     const project = await getProject(projectId)
     createProjectOwnerId.value = project.owner.id
+    createProjectArchived.value = Boolean(project.archivedAt)
   } catch {
     createProjectOwnerId.value = null
+    createProjectArchived.value = false
   }
 }
 
@@ -319,6 +323,7 @@ const canCreateTask = computed(() => {
   if (authStore.currentUser?.systemRole !== 'USER') return false
   const pid = appliedFilters.value.projectId
   if (!pid) return false
+  if (createProjectArchived.value) return false
   return createProjectOwnerId.value === authStore.currentUser?.id
 })
 
