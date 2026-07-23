@@ -85,7 +85,7 @@ public class OverviewService {
 			.map(ProjectMember::getProjectId)
 			.filter(id -> requestedProjectId == null || requestedProjectId.equals(id))
 			.toList();
-		return projectIds.isEmpty() ? List.of() : projectMapper.selectBatchIds(projectIds);
+		return projectIds.isEmpty() ? List.of() : projectMapper.selectByIds(projectIds);
 	}
 
 	private OverviewResponse response(
@@ -169,7 +169,7 @@ public class OverviewService {
 		if (userIds.isEmpty()) {
 			return Map.of();
 		}
-		return userMapper.selectBatchIds(userIds).stream()
+		return userMapper.selectByIds(userIds).stream()
 			.collect(Collectors.toMap(User::getId, Function.identity()));
 	}
 

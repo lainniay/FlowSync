@@ -84,7 +84,7 @@ public class AiContextService {
 			.map(ProjectMember::getUserId)
 			.toList();
 		List<MemberContext> members = memberIds.isEmpty() ? List.of()
-			: userMapper.selectBatchIds(memberIds).stream()
+			: userMapper.selectByIds(memberIds).stream()
 				.filter(User::isActive)
 				.filter(user -> user.getSystemRole() == SystemRole.USER)
 				.sorted(Comparator.comparing(User::getId))

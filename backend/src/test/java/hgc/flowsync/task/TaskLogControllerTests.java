@@ -142,7 +142,7 @@ class TaskLogControllerTests {
 			.andExpect(jsonPath("$.items[0].createdAt")
 				.value(ApiDateTime.toInstant(LocalDateTime.of(2026, 7, 17, 11, 0)).toString()))
 			.andExpect(jsonPath("$.items[0].operatorId").doesNotExist());
-		verify(userMapper, times(1)).selectBatchIds(anyCollection());
+		verify(userMapper, times(1)).selectByIds(anyCollection());
 
 		logRequest(get("/api/tasks/" + task.getId() + "/logs"), login(admin), null)
 			.andExpect(status().isOk())

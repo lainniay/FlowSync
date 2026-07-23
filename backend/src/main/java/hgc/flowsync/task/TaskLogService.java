@@ -119,7 +119,7 @@ public class TaskLogService {
 			operatorIds.add(taskLog.getOperatorId());
 		}
 		Map<Long, User> operators = new HashMap<>();
-		for (User operator : userMapper.selectBatchIds(operatorIds)) {
+		for (User operator : userMapper.selectByIds(operatorIds)) {
 			operators.put(operator.getId(), operator);
 		}
 		return taskLogs.stream()
