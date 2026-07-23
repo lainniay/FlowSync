@@ -112,9 +112,6 @@ async function handleLogout(): Promise<void> {
         </el-menu-item>
       </el-menu>
 
-      <p class="menu-note">
-        灰色菜单将在对应业务模块接入后启用。
-      </p>
     </aside>
 
     <section class="app-workspace">
@@ -202,13 +199,6 @@ async function handleLogout(): Promise<void> {
   border-right: 0;
 }
 
-.menu-note {
-  margin: 0;
-  padding: 16px 20px;
-  color: var(--fs-color-text-secondary, #64748b);
-  font-size: 12px;
-  line-height: 1.5;
-}
 
 .app-workspace {
   min-width: 0;

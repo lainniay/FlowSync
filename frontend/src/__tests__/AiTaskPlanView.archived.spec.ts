@@ -14,6 +14,8 @@ import {
 import { getProject } from '@/views/projects/api'
 import AiTaskPlanView from '@/views/ai/AiTaskPlanView.vue'
 
+const routerPush = vi.hoisted(() => vi.fn<(location: unknown) => void>())
+
 vi.mock('@/views/projects/api', () => ({
   getProject: vi.fn<typeof getProject>(),
 }))
@@ -38,12 +40,13 @@ vi.mock('vue-router', () => ({
     params: { projectId: '103' },
   }),
   useRouter: () => ({
-    push: vi.fn<() => Promise<void>>(),
+    push: routerPush,
   }),
 }))
 
 beforeEach(() => {
   vi.mocked(getProject).mockReset()
+  routerPush.mockReset()
 })
 
 describe('AiTaskPlanView archived project gate', () => {
@@ -65,7 +68,10 @@ describe('AiTaskPlanView archived project gate', () => {
     })
 
     const wrapper = shallowMount(AiTaskPlanView, {
-      global: { plugins: [createPinia()] },
+      global: {
+        plugins: [createPinia()],
+        stubs: { RouterLink: true },
+      },
     })
 
     await flushPromises()
@@ -74,5 +80,12 @@ describe('AiTaskPlanView archived project gate', () => {
     expect(alert.exists()).toBe(true)
     expect(alert.attributes('title')).toContain('项目已归档')
     expect(wrapper.text()).not.toContain('生成初步计划')
+
+    await wrapper.get('[data-testid="back-to-project"]').trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'project-detail',
+      params: { projectId: '103' },
+    })
   })
 })

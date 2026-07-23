@@ -44,6 +44,17 @@ const authStore = useAuthStore()
 
 const summaryId = computed(() => route.params.summaryId as string)
 
+function getSummaryListLocation() {
+  const projectId = typeof route.query?.projectId === 'string'
+    ? route.query.projectId
+    : ''
+
+  return {
+    name: 'summaries',
+    ...(projectId ? { query: { projectId } } : {}),
+  }
+}
+
 type TagType =
   | 'primary'
   | 'success'
@@ -70,7 +81,7 @@ const notFound = ref(false)
 
 // --- Project owner ---
 const projectOwner = ref<{ id: string; displayName: string } | null>(null)
-const projectArchived = ref(false)
+const projectArchived = ref<boolean | null>(null)
 
 // --- Permissions ---
 const isAdmin = computed(() => authStore.currentUser?.systemRole === 'ADMIN')
@@ -82,7 +93,7 @@ const isProjectOwner = computed(() =>
 )
 const canModify = computed(
   () => !isAdmin.value
-    && !projectArchived.value
+    && projectArchived.value === false
     && (isCreator.value || isProjectOwner.value),
 )
 
@@ -90,6 +101,8 @@ async function fetchSummary(): Promise<void> {
   loading.value = true
   errorMessage.value = ''
   notFound.value = false
+  projectOwner.value = null
+  projectArchived.value = null
 
   try {
     summary.value = await getSummary(summaryId.value)
@@ -101,7 +114,7 @@ async function fetchSummary(): Promise<void> {
       projectArchived.value = Boolean(project.archivedAt)
     } catch {
       projectOwner.value = null
-      projectArchived.value = false
+      projectArchived.value = null
     }
   } catch (error) {
     if (hasApiStatus(error, 404)) {
@@ -136,12 +149,17 @@ function openEditDialog(): void {
 }
 
 async function handleEdit(): Promise<void> {
+  const content = editForm.content.trim()
+  if (!content) {
+    ElMessage.warning('请输入总结内容')
+    return
+  }
   editSubmitting.value = true
 
   try {
     const body: UpdateSummaryBody = {
       type: editForm.type,
-      content: editForm.content.trim(),
+      content,
     }
 
     summary.value = await updateSummary(summaryId.value, body)
@@ -166,7 +184,7 @@ async function handleDelete(): Promise<void> {
   try {
     await deleteSummary(summaryId.value)
     ElMessage.success('总结已删除')
-    await router.push({ name: 'summaries' })
+    await router.push(getSummaryListLocation())
   } catch (error) {
     ElMessage.error(
       getApiErrorMessage(error, '删除总结失败，请稍后重试'),
@@ -188,7 +206,7 @@ function formatDateTime(value: string): string {
 }
 
 function goBack(): void {
-  void router.push({ name: 'summaries' })
+  void router.push(getSummaryListLocation())
 }
 
 onMounted(() => {
@@ -213,7 +231,7 @@ onMounted(() => {
             type="error"
             show-icon
           />
-          <router-link :to="{ name: 'summaries' }">
+          <router-link :to="getSummaryListLocation()">
             返回总结列表
           </router-link>
         </div>
@@ -243,7 +261,7 @@ onMounted(() => {
       <header class="page-header">
         <div>
           <p class="breadcrumb">
-            <RouterLink :to="{ name: 'summaries' }">
+            <RouterLink :to="getSummaryListLocation()">
               总结
             </RouterLink>
             <span>/</span>

@@ -1,7 +1,4 @@
-import {
-  flushPromises,
-  mount,
-} from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import {
   beforeEach,
@@ -11,8 +8,10 @@ import {
   vi,
 } from 'vitest'
 
+import { getTaskSuggestion } from '@/views/ai/api'
 import { getProject } from '@/views/projects/api'
 import {
+  createTaskLog,
   getTask,
   getTaskLogs,
   getTasks,
@@ -83,6 +82,8 @@ beforeEach(() => {
   vi.mocked(getTaskLogs).mockReset()
   vi.mocked(getTasks).mockReset()
   vi.mocked(getProject).mockReset()
+  vi.mocked(createTaskLog).mockReset()
+  vi.mocked(getTaskSuggestion).mockReset()
   authState.currentUser = {
     id: '2',
     username: 'zhangsan',
@@ -137,6 +138,180 @@ describe('TaskDetailView archived project write gates', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('编辑')
+    expect(wrapper.text()).not.toContain('删除任务')
+    expect(wrapper.text()).not.toContain('新增日志')
+    expect(wrapper.text()).not.toContain('获取 AI 建议')
+  })
+
+  it('shows a retryable error when loading logs fails', async () => {
+    vi.mocked(getTask).mockResolvedValue(task)
+    vi.mocked(getTaskLogs)
+      .mockRejectedValueOnce(new Error('logs failed'))
+      .mockResolvedValueOnce({
+        items: [],
+        page: 0,
+        size: 20,
+        totalElements: 0,
+        totalPages: 0,
+      })
+    vi.mocked(getTasks).mockResolvedValue({
+      items: [],
+      page: 0,
+      size: 50,
+      totalElements: 0,
+      totalPages: 0,
+    })
+    vi.mocked(getProject).mockResolvedValue({
+      id: '103',
+      owner: { id: '2', displayName: '张三' },
+      name: 'Active Project',
+      description: null,
+      status: 'IN_PROGRESS',
+      priority: 'MEDIUM',
+      startDate: null,
+      endDate: null,
+      archivedAt: null,
+      memberCount: 1,
+      taskStats: { total: 1, completed: 0 },
+      createdAt: '2026-07-13T08:10:00Z',
+      updatedAt: '2026-07-20T08:00:00Z',
+    })
+
+    const wrapper = mount(TaskDetailView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('进度记录加载失败')
+    expect(wrapper.text()).toContain('重新加载')
+    expect(wrapper.text()).not.toContain('暂无进度记录')
+
+    const retryButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === '重新加载')
+
+    expect(retryButton).toBeDefined()
+
+    await retryButton!.trigger('click')
+    await flushPromises()
+
+    expect(getTaskLogs).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).not.toContain('进度记录加载失败')
+  })
+
+  it('does not submit an AI suggestion longer than 1000 characters', async () => {
+    vi.mocked(getTask).mockResolvedValue(task)
+    vi.mocked(getTaskLogs).mockResolvedValue({
+      items: [],
+      page: 0,
+      size: 20,
+      totalElements: 0,
+      totalPages: 0,
+    })
+    vi.mocked(getTasks).mockResolvedValue({
+      items: [],
+      page: 0,
+      size: 50,
+      totalElements: 0,
+      totalPages: 0,
+    })
+    vi.mocked(getProject).mockResolvedValue({
+      id: '103',
+      owner: { id: '2', displayName: '张三' },
+      name: 'Active Project',
+      description: null,
+      status: 'IN_PROGRESS',
+      priority: 'MEDIUM',
+      startDate: null,
+      endDate: null,
+      archivedAt: null,
+      memberCount: 1,
+      taskStats: { total: 1, completed: 0 },
+      createdAt: '2026-07-13T08:10:00Z',
+      updatedAt: '2026-07-20T08:00:00Z',
+    })
+    vi.mocked(getTaskSuggestion).mockResolvedValue({
+      suggestion: 'x'.repeat(1001),
+      generatedAt: '2026-07-22T12:00:00Z',
+    })
+
+    const wrapper = mount(TaskDetailView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const generateButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === '获取 AI 建议')
+
+    expect(generateButton).toBeDefined()
+
+    await generateButton!.trigger('click')
+    await flushPromises()
+
+    const suggestionInput = wrapper.find('.ai-form textarea')
+    expect(suggestionInput.exists()).toBe(true)
+    expect(
+      (suggestionInput.element as HTMLTextAreaElement).value,
+    ).toHaveLength(1001)
+
+    const submitButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === '提交为进度记录')
+
+    expect(submitButton).toBeDefined()
+
+    await submitButton!.trigger('click')
+    await flushPromises()
+
+    expect(createTaskLog).not.toHaveBeenCalled()
+  })
+
+  it('hides write actions when project context cannot be loaded', async () => {
+    vi.mocked(getTask).mockResolvedValue(task)
+    vi.mocked(getTaskLogs).mockResolvedValue({
+      items: [],
+      page: 0,
+      size: 20,
+      totalElements: 0,
+      totalPages: 0,
+    })
+    vi.mocked(getTasks).mockResolvedValue({
+      items: [],
+      page: 0,
+      size: 50,
+      totalElements: 0,
+      totalPages: 0,
+    })
+    vi.mocked(getProject).mockRejectedValue(
+      new Error('project context failed'),
+    )
+
+    const wrapper = mount(TaskDetailView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('编辑')
+    expect(wrapper.text()).not.toContain('修改状态')
     expect(wrapper.text()).not.toContain('删除任务')
     expect(wrapper.text()).not.toContain('新增日志')
     expect(wrapper.text()).not.toContain('获取 AI 建议')

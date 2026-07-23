@@ -1,6 +1,7 @@
 # 队友 B：任务与内容协作模块 — 开发文档
 
-开发分支 `feat/frontend-work-content`，基于 `main` 创建（2026-07-21）。
+原始开发分支为 `feat/frontend-work-content`。当前修复从最新 `main` 创建独立集成分支，
+吸收 PR #25 的修复，不直接修改或覆盖 PR #20 原分支。
 
 ## 完成情况
 
@@ -59,10 +60,16 @@
 
 ### 测试文件
 
-| 文件 | 测试数 | 覆盖场景 |
-|---|---|---|
-| `src/__tests__/TaskListView.spec.ts` | 3 | success / empty / error |
-| `src/__tests__/SummaryListView.spec.ts` | 3 | success / empty / error |
+| 文件 | 覆盖场景 |
+|---|---|
+| `src/__tests__/TaskListView.spec.ts` | 任务列表 success / empty / error |
+| `src/__tests__/SummaryListView.spec.ts` | 总结列表 success / empty / error |
+| `src/__tests__/TaskListView.archived.spec.ts` | 归档项目隐藏任务创建入口 |
+| `src/__tests__/TaskDetailView.archived.spec.ts` | 归档与项目上下文失败时关闭写入口、日志失败重试、超长 AI 建议拦截 |
+| `src/__tests__/SummaryListView.create.spec.ts` | 创建总结默认项目为空，仅显式路由上下文预填 |
+| `src/__tests__/SummaryDetailView.archived.spec.ts` | 归档与项目上下文失败时隐藏总结编辑、删除入口 |
+| `src/__tests__/AiTaskPlanView.archived.spec.ts` | 归档项目拒绝进入 AI 计划写流程 |
+| `src/__tests__/task-b-verification.spec.ts` | 既有 MSW 权限与状态验证；保留但不继续扩充重复 API 测试 |
 
 ---
 
@@ -111,16 +118,19 @@ Router (/tasks, /tasks/:taskId, /summaries, ...)
 
 ## 权限判断
 
-| 场景 | 判断方式 |
-|---|---|
-| ADMIN 隐藏写按钮 | `systemRole === 'ADMIN'` → 不渲染 |
-| 任务编辑/删除 | 项目 owner，且项目未归档 |
-| 任务状态修改 / 新增日志 / AI 建议 | 项目 owner 或任务 assignee，且项目未归档 |
-| 日志删除 | 项目 owner 或日志 operator，且项目未归档 |
-| AI 计划入口 | 项目 owner，且项目未归档；ADMIN 禁止 |
-| 总结编辑/删除 | 总结创建者或项目 owner，且项目未归档 |
-| 总结创建 | 非 ADMIN 的项目成员（服务端校验） |
-| 创建任务入口 | 当前筛选项目的 owner，且项目未归档 |
+| 场景 | owner | assignee | creator / operator | member | ADMIN | archived |
+|---|---|---|---|---|---|---|
+| 创建任务 | 允许 | 仅同时为 owner 时允许 | 仅同时为 owner 时允许 | 禁止 | 禁止 | 禁止 |
+| 编辑、删除任务 | 允许 | 禁止 | 禁止 | 禁止 | 禁止 | 禁止 |
+| 修改任务状态 | 允许 | 允许 | 仅同时为 owner 或 assignee 时允许 | 禁止 | 禁止 | 禁止 |
+| 创建任务日志、使用 AI 建议 | 允许 | 允许 | 仅同时为 owner 或 assignee 时允许 | 禁止 | 禁止 | 禁止 |
+| 删除任务日志 | 允许 | 仅同时为日志 operator 时允许 | 日志 operator 允许 | 禁止 | 禁止 | 禁止 |
+| 创建总结 | 允许 | 项目成员允许 | 项目成员允许 | 允许 | 禁止 | 禁止 |
+| 编辑、删除总结 | 允许 | 仅同时为总结 creator 时允许 | 总结 creator 允许 | 禁止 | 禁止 | 禁止 |
+| 生成、编辑、导入 AI 计划 | 允许 | 禁止 | 禁止 | 禁止 | 禁止 | 禁止 |
+
+前端必须先确认项目明确处于未归档状态才显示项目内容写入口。项目上下文请求失败或尚未完成
+时按只读处理；后端仍是最终权限校验方。
 
 ---
 
@@ -130,7 +140,9 @@ Router (/tasks, /tasks/:taskId, /summaries, ...)
 - 资源更新使用完整 PUT（所有可编辑字段必传，nullable 字段传 `null`）
 - `progressPercent` 来自最新 TaskLog，创建/删除日志后需要重新获取 Task
 - AI 建议为临时文本，用户必须人工编辑并通过 `POST /tasks/{taskId}/logs` 提交
+- AI 建议可能超过 TaskLog `content` 的 1000 字限制；提交前必须提示用户人工精简，不能静默截断
 - AI 任务计划全部状态为前端临时，不持久化。刷新/离开即丢失
+- 不得为总结内容或 AI 计划补充说明增加契约之外的前端长度限制
 - 删除任务遇到 409（有子任务/日志/总结）时保留页面，展示错误
 - 分页：API 0-based，Element Plus 1-based
 - 所有枚举值使用中文 Record 映射，不直接展示 API 枚举名
@@ -141,19 +153,31 @@ Router (/tasks, /tasks/:taskId, /summaries, ...)
 
 | 命令 | 结果 |
 |---|---|
-| `pnpm lint` | 0 warning, 0 error |
-| `pnpm test` | 13 files, 119 tests 全部通过 |
-| `pnpm test:mock` | 5 files, 89 tests 全部通过 |
-| `pnpm build` | TypeScript 类型检查 + Vite production build 通过 |
+| 任务与总结详情定向回归 | 2 files, 6 tests 全部通过 |
+| `pnpm exec oxlint .` | 108 files，0 warning，0 error |
+| `pnpm exec eslint . --no-cache` | 通过 |
+| `pnpm test` | 28 files，187 tests 全部通过 |
+| `pnpm test:mock` | 5 files，89 tests 全部通过 |
+| `pnpm build` | TypeScript 类型检查与 Vite production build 通过 |
+
+### 真实后端联调
+
+- 登录、刷新后 Session 保持、`GET /users/me` 与 Overview 请求正常。
+- ADMIN 创建 USER、项目和项目成员成功；ADMIN 的任务、总结创建入口隐藏。
+- owner 创建、编辑任务，修改状态，创建日志并删除 assignee 日志后数据立即同步。
+- assignee 只能修改状态、创建日志和使用 AI 入口，不能编辑或删除任务。
+- member 创建、编辑总结，项目 owner 可编辑 member 创建的总结。
+- 归档后任务、日志、总结和 AI 写入口全部关闭；任务与总结仍可只读访问。
+- 项目详情已接入任务、总结和 AI 计划入口，列表、详情和项目之间保留返回路径与项目筛选。
+- 本地 AI provider 未启用，已验证 `503` 错误反馈；真实 AI 成功生成不在本轮可执行范围内。
 
 ---
 
-## 待接入（需基座维护者操作）
+## 集成状态
 
-1. **路由接入** — 在 `src/router/index.ts` 中 import 并展开 `taskRoutes`、`summaryRoutes`、`aiRoutes`
-2. **菜单接入** — 在 `src/layouts/AppLayout.vue` 的 `adminMenu` 和 `userMenu` 中为「任务」「总结」启用菜单项（将 `disabled: true` 改为 `false`）
-
-模块开发者不应自行修改上述公共文件。
+- `taskRoutes`、`summaryRoutes`、`aiRoutes` 已由前端集成负责人接入根路由。
+- ADMIN 与 USER 的任务、总结菜单已启用；用户管理、邀请和个人中心菜单保持最新 `main` 状态。
+- 公共根路由和 `AppLayout` 继续由前端负责人统一维护，业务模块不得自行覆盖公共菜单。
 
 ---
 
@@ -168,6 +192,7 @@ Router (/tasks, /tasks/:taskId, /summaries, ...)
 - [ ] 按标题搜索不存在的文字 → 空状态 + 「重置筛选」按钮
 - [ ] 点击任务标题 → 跳转到任务详情
 - [ ] 以 `admin` 登录 → 无「创建任务」按钮
+- [ ] 以 owner 访问归档项目上下文 → 无「创建任务」按钮
 
 ### 任务详情 `/tasks/501`
 - [ ] 显示标题、状态 tag、优先级 tag、进度 40%、描述、创建者、负责人
@@ -179,11 +204,14 @@ Router (/tasks, /tasks/:taskId, /summaries, ...)
 - [ ] 点击「删除任务」（任务 501 有日志）→ 409 错误提示，不跳转
 - [ ] 访问 `/tasks/999` → 「任务不存在或当前用户不可见」
 - [ ] 以 `admin` 登录 → 无编辑/删除/状态修改/新增日志按钮
+- [ ] 访问归档项目任务 → 无编辑、删除、状态、日志和 AI 写入口
+- [ ] 日志请求失败 → 显示独立错误与重试入口，不显示空列表或旧数据
 
 ### AI 建议（在 `/tasks/501` 内，以 `lisi` 登录）
 - [ ] 可见「AI 任务建议」区域（lisi 是 assignee）
 - [ ] 点击「获取 AI 建议」→ loading → 显示可编辑文本 + 进度输入框
 - [ ] 编辑文本 → 点击「提交为进度记录」→ 日志新增成功，AI 区清空
+- [ ] AI 返回超过 1000 字建议 → 阻止提交并提示人工精简，不静默截断
 
 ### 任务删除 `/tasks/502`
 - [ ] 任务 502 无日志/子任务 → 点击「删除」→ 确认 → 删除成功 → 跳回任务列表
@@ -200,6 +228,8 @@ Router (/tasks, /tasks/:taskId, /summaries, ...)
 - [ ] 按类型筛选「阶段总结」→ 全部显示
 - [ ] 按类型筛选「最终总结」→ 空状态
 - [ ] 点击「创建总结」→ 填写项目/类型/内容 → 提交 → 列表刷新
+- [ ] 无项目路由上下文时打开创建表单 → 项目 ID 默认为空
+- [ ] 从明确的项目路由上下文进入 → 创建表单可预填对应项目 ID
 - [ ] 点击「查看」→ 进入详情
 
 ### 总结详情 `/summaries/901`
@@ -208,3 +238,4 @@ Router (/tasks, /tasks/:taskId, /summaries, ...)
 - [ ] 点击「删除」→ 确认 → 删除成功 → 跳回列表
 - [ ] 以 `lisi`（非创建者）登录 → 无编辑/删除按钮
 - [ ] 以 `admin` 登录 → 只读，无任何操作按钮
+- [ ] 访问归档项目总结 → 创建者和 owner 均无编辑、删除入口

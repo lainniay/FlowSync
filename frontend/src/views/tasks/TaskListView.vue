@@ -106,15 +106,16 @@ const priorityTagTypes: Record<Priority, TagType> = {
   HIGH: 'danger',
 }
 
-function createInitialFilters(): TaskListFilters {
-  const queryProjectId =
-    typeof route?.query?.projectId === 'string'
-      ? route.query.projectId
-      : ''
+function getRouteProjectId(): string {
+  return typeof route?.query?.projectId === 'string'
+    ? route.query.projectId
+    : ''
+}
 
+function createInitialFilters(): TaskListFilters {
   return {
     q: '',
-    projectId: queryProjectId,
+    projectId: getRouteProjectId(),
     assigneeId: '',
     status: '',
     priority: '',
@@ -241,7 +242,10 @@ async function handleReset(): Promise<void> {
   appliedFilters.value = initial
   page.value = 0
 
-  await loadTasks()
+  await Promise.all([
+    loadTasks(),
+    checkCreatePermission(initial.projectId),
+  ])
 }
 
 async function handlePageChange(
@@ -344,13 +348,19 @@ async function handleCreate(): Promise<void> {
   const valid = await form.validate().catch(() => false)
   if (!valid) return
 
+  const title = createForm.title.trim()
+  if (!title) {
+    ElMessage.warning('请输入任务标题')
+    return
+  }
+
   createSubmitting.value = true
 
   try {
     const body: CreateTaskBody = {
       projectId: createForm.projectId.trim(),
       parentId: createForm.parentId.trim() || null,
-      title: createForm.title.trim(),
+      title,
       description: createForm.description.trim() || null,
       assigneeId: createForm.assigneeId.trim() || null,
       status: createForm.status,
@@ -371,10 +381,29 @@ async function handleCreate(): Promise<void> {
   }
 }
 
-function goToTask(taskId: string): void {
-  void router.push({
+function getTaskDetailLocation(taskId: string) {
+  const routeProjectId = getRouteProjectId()
+
+  return {
     name: 'task-detail',
     params: { taskId },
+    ...(routeProjectId
+      ? { query: { projectId: routeProjectId } }
+      : {}),
+  }
+}
+
+function goToTask(taskId: string): void {
+  void router.push(getTaskDetailLocation(taskId))
+}
+
+function goToProject(): void {
+  const routeProjectId = getRouteProjectId()
+  if (!routeProjectId) return
+
+  void router.push({
+    name: 'project-detail',
+    params: { projectId: routeProjectId },
   })
 }
 
@@ -408,6 +437,14 @@ onMounted(async () => {
       </div>
 
       <div class="header-actions">
+        <el-button
+          v-if="getRouteProjectId()"
+          data-testid="back-to-project"
+          @click="goToProject"
+        >
+          返回项目
+        </el-button>
+
         <el-button
           v-if="canCreateTask"
           type="primary"
@@ -574,7 +611,7 @@ onMounted(async () => {
           >
             <template #default="{ row }">
               <router-link
-                :to="`/tasks/${row.id}`"
+                :to="getTaskDetailLocation((row as Task).id)"
                 class="task-link"
               >
                 {{ row.title }}

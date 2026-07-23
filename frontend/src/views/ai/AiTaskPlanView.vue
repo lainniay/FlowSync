@@ -288,7 +288,17 @@ async function handleImport(): Promise<void> {
 }
 
 function handleBackToTasks(): void {
-  router.push({ name: 'tasks', query: { projectId: projectId.value } })
+  void router.push({
+    name: 'tasks',
+    query: { projectId: projectId.value },
+  })
+}
+
+function handleBackToProject(): void {
+  void router.push({
+    name: 'project-detail',
+    params: { projectId: projectId.value },
+  })
 }
 </script>
 
@@ -301,6 +311,13 @@ function handleBackToTasks(): void {
           为项目 {{ projectId }} 生成临时任务计划，人工审阅编辑后导入为正式任务。
         </p>
       </div>
+
+      <el-button
+        data-testid="back-to-project"
+        @click="handleBackToProject"
+      >
+        返回项目
+      </el-button>
     </header>
 
     <!-- Step: Loading -->

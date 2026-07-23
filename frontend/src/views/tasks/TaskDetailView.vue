@@ -38,6 +38,7 @@ import 'element-plus/es/components/form-item/style/css'
 import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/input-number/style/css'
 import 'element-plus/es/components/loading/style/css'
+import 'element-plus/es/components/message-box/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/select/style/css'
@@ -78,6 +79,17 @@ const router = useRouter()
 const authStore = useAuthStore()
 
 const taskId = computed(() => route.params.taskId as string)
+
+function getTaskListLocation() {
+  const projectId = typeof route.query?.projectId === 'string'
+    ? route.query.projectId
+    : ''
+
+  return {
+    name: 'tasks',
+    ...(projectId ? { query: { projectId } } : {}),
+  }
+}
 
 type TagType =
   | 'primary'
@@ -125,7 +137,7 @@ const notFound = ref(false)
 
 // --- Project owner ---
 const projectOwner = ref<{ id: string; displayName: string } | null>(null)
-const projectArchived = ref(false)
+const projectArchived = ref<boolean | null>(null)
 
 // --- Logs ---
 const logs = ref<TaskLog[]>([])
@@ -144,7 +156,7 @@ const isProjectOwner = computed(() =>
   projectOwner.value?.id === authStore.currentUser?.id,
 )
 const canWriteProjectContent = computed(
-  () => !isAdmin.value && !projectArchived.value,
+  () => !isAdmin.value && projectArchived.value === false,
 )
 const canEdit = computed(
   () => canWriteProjectContent.value && isProjectOwner.value,
@@ -175,14 +187,16 @@ async function fetchTask(): Promise<void> {
     const result = await getTask(taskId.value)
     task.value = result
 
-    // Fetch project owner for permission checks
+    // Fetch project owner and archive state for permission checks.
+    // Keep projectArchived as null when this context cannot be loaded,
+    // so project-content write actions remain unavailable.
     try {
       const project = await getProject(result.projectId)
       projectOwner.value = project.owner
       projectArchived.value = Boolean(project.archivedAt)
     } catch {
       projectOwner.value = null
-      projectArchived.value = false
+      projectArchived.value = null
     }
 
     if (result.parentId) {
@@ -279,12 +293,19 @@ function openEditDialog(): void {
 }
 
 async function handleEdit(): Promise<void> {
+  const title = editForm.title.trim()
+
+  if (!title) {
+    ElMessage.warning('请输入任务标题')
+    return
+  }
+
   editSubmitting.value = true
 
   try {
     const body: UpdateTaskBody = {
       parentId: editForm.parentId.trim() || null,
-      title: editForm.title.trim(),
+      title,
       description: editForm.description.trim() || null,
       assigneeId: editForm.assigneeId.trim() || null,
       status: editForm.status,
@@ -344,7 +365,7 @@ async function handleDelete(): Promise<void> {
   try {
     await deleteTask(taskId.value)
     ElMessage.success('任务已删除')
-    await router.push({ name: 'tasks' })
+    await router.push(getTaskListLocation())
   } catch (error) {
     if (hasApiStatus(error, 409)) {
       ElMessage.error(
@@ -514,7 +535,7 @@ function resetDetailState(): void {
   notFound.value = false
   taskLoaded.value = false
   projectOwner.value = null
-  projectArchived.value = false
+  projectArchived.value = null
   logs.value = []
   logsError.value = ''
   logPage.value = 0
@@ -528,7 +549,7 @@ async function loadDetailData(): Promise<void> {
 }
 
 function goBack(): void {
-  void router.push({ name: 'tasks' })
+  void router.push(getTaskListLocation())
 }
 
 onMounted(() => {
@@ -560,7 +581,7 @@ watch(
             type="error"
             show-icon
           />
-          <router-link :to="{ name: 'tasks' }">
+          <router-link :to="getTaskListLocation()">
             返回任务列表
           </router-link>
         </div>
@@ -590,7 +611,7 @@ watch(
       <header class="page-header">
         <div>
           <p class="breadcrumb">
-            <RouterLink :to="{ name: 'tasks' }">
+            <RouterLink :to="getTaskListLocation()">
               任务
             </RouterLink>
             <span>/</span>

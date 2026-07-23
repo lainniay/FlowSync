@@ -42,6 +42,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { getApiErrorMessage } from '@/shared/api/errors'
 import type { SummaryType } from '@/shared/api/types'
 import { useAuthStore } from '@/stores/auth'
+import { getProject } from '@/views/projects/api'
 
 import {
   createSummary,
@@ -82,14 +83,15 @@ const typeTagTypes: Record<SummaryType, TagType> = {
   FINAL: 'success',
 }
 
-function createInitialFilters(): SummaryListFilters {
-  const queryProjectId =
-    typeof route.query.projectId === 'string'
-      ? route.query.projectId
-      : ''
+function getRouteProjectId(): string {
+  return typeof route.query.projectId === 'string'
+    ? route.query.projectId
+    : ''
+}
 
+function createInitialFilters(): SummaryListFilters {
   return {
-    projectId: queryProjectId,
+    projectId: getRouteProjectId(),
     taskId: '',
     type: '',
     createdBy: '',
@@ -112,6 +114,17 @@ const totalPages = ref(0)
 const loading = ref(false)
 const loaded = ref(false)
 const errorMessage = ref('')
+const routeProjectWritable = ref<boolean | null>(
+  getRouteProjectId() ? null : true,
+)
+
+const canCreate = computed(() => (
+  authStore.currentUser?.systemRole === 'USER'
+  && (
+    !getRouteProjectId()
+    || routeProjectWritable.value === true
+  )
+))
 
 const hasActiveFilters = computed(() => {
   const current = appliedFilters.value
@@ -179,6 +192,24 @@ async function loadSummaries(): Promise<void> {
   }
 }
 
+async function loadRouteProjectContext(): Promise<void> {
+  const routeProjectId = getRouteProjectId()
+
+  if (!routeProjectId) {
+    routeProjectWritable.value = true
+    return
+  }
+
+  routeProjectWritable.value = null
+
+  try {
+    const project = await getProject(routeProjectId)
+    routeProjectWritable.value = project.archivedAt === null
+  } catch {
+    routeProjectWritable.value = false
+  }
+}
+
 async function handleSearch(): Promise<void> {
   appliedFilters.value = {
     projectId: filters.projectId.trim(),
@@ -243,7 +274,7 @@ const createRules: FormRules = {
 function openCreateDialog(): void {
   Object.assign(createForm, {
     ...defaultCreateForm,
-    projectId: appliedFilters.value.projectId || '',
+    projectId: getRouteProjectId(),
   })
   createDialogVisible.value = true
 }
@@ -255,6 +286,12 @@ async function handleCreate(): Promise<void> {
   const valid = await form.validate().catch(() => false)
   if (!valid) return
 
+  const content = createForm.content.trim()
+  if (!content) {
+    ElMessage.warning('请输入总结内容')
+    return
+  }
+
   createSubmitting.value = true
 
   try {
@@ -262,7 +299,7 @@ async function handleCreate(): Promise<void> {
       projectId: createForm.projectId.trim(),
       taskId: createForm.taskId.trim() || null,
       type: createForm.type,
-      content: createForm.content.trim(),
+      content,
     }
 
     await createSummary(body)
@@ -279,9 +316,24 @@ async function handleCreate(): Promise<void> {
 }
 
 function goToSummary(summaryId: string): void {
+  const routeProjectId = getRouteProjectId()
+
   void router.push({
     name: 'summary-detail',
     params: { summaryId },
+    ...(routeProjectId
+      ? { query: { projectId: routeProjectId } }
+      : {}),
+  })
+}
+
+function goToProject(): void {
+  const routeProjectId = getRouteProjectId()
+  if (!routeProjectId) return
+
+  void router.push({
+    name: 'project-detail',
+    params: { projectId: routeProjectId },
   })
 }
 
@@ -302,7 +354,10 @@ function formatDateTime(value: string): string {
 }
 
 onMounted(() => {
-  void loadSummaries()
+  void Promise.all([
+    loadSummaries(),
+    loadRouteProjectContext(),
+  ])
 })
 
 defineExpose({
@@ -323,7 +378,15 @@ defineExpose({
 
       <div class="header-actions">
         <el-button
-          v-if="authStore.currentUser?.systemRole === 'USER'"
+          v-if="getRouteProjectId()"
+          data-testid="back-to-project"
+          @click="goToProject"
+        >
+          返回项目
+        </el-button>
+
+        <el-button
+          v-if="canCreate"
           type="primary"
           @click="openCreateDialog"
         >

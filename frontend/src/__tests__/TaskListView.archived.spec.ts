@@ -24,6 +24,8 @@ const authState = vi.hoisted(() => ({
   },
 }))
 
+const routerPush = vi.hoisted(() => vi.fn<(location: unknown) => void>())
+
 vi.mock('@/views/tasks/api', () => ({
   createTask: vi.fn<() => Promise<unknown>>(),
   getTasks: vi.fn<typeof getTasks>(),
@@ -42,13 +44,14 @@ vi.mock('vue-router', () => ({
     query: { projectId: '103' },
   }),
   useRouter: () => ({
-    push: vi.fn<() => Promise<void>>(),
+    push: routerPush,
   }),
 }))
 
 beforeEach(() => {
   vi.mocked(getTasks).mockReset()
   vi.mocked(getProject).mockReset()
+  routerPush.mockReset()
   authState.currentUser = {
     id: '2',
     username: 'zhangsan',
@@ -83,12 +86,22 @@ describe('TaskListView archived project create permission', () => {
     })
 
     const wrapper = shallowMount(TaskListView, {
-      global: { plugins: [createPinia()] },
+      global: {
+        plugins: [createPinia()],
+        stubs: { RouterLink: true },
+      },
     })
 
     await flushPromises()
 
     expect(getProject).toHaveBeenCalledWith('103')
     expect(wrapper.text()).not.toContain('创建任务')
+
+    await wrapper.get('[data-testid="back-to-project"]').trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'project-detail',
+      params: { projectId: '103' },
+    })
   })
 })

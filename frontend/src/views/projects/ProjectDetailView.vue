@@ -172,6 +172,12 @@ const canViewInvitations = computed(() => (
   isOwner.value || isAdmin.value
 ))
 
+const canUseAiPlan = computed(() => (
+  isOwner.value
+  && authStore.currentUser?.systemRole === 'USER'
+  && !isArchived.value
+))
+
 const transferRules: FormRules<{ ownerId: string }> = {
   ownerId: [
     { required: true, message: '请选择新的 owner', trigger: 'change' },
@@ -596,15 +602,73 @@ onMounted(() => {
           </el-tab-pane>
 
           <el-tab-pane label="任务" name="tasks">
-            <p class="placeholder-note">
-              项目任务列表由任务模块负责，将在后续接入。
-            </p>
+            <div
+              class="module-entry"
+              data-testid="project-tasks-entry"
+            >
+              <div>
+                <h3>项目任务</h3>
+                <p>查看和管理当前项目的任务、状态与进度记录。</p>
+              </div>
+              <RouterLink
+                :to="{
+                  name: 'tasks',
+                  query: { projectId: project.id },
+                }"
+              >
+                <el-button type="primary">
+                  查看项目任务
+                </el-button>
+              </RouterLink>
+            </div>
           </el-tab-pane>
 
           <el-tab-pane label="总结" name="summaries">
-            <p class="placeholder-note">
-              项目总结列表由总结模块负责，将在后续接入。
-            </p>
+            <div
+              class="module-entry"
+              data-testid="project-summaries-entry"
+            >
+              <div>
+                <h3>项目总结</h3>
+                <p>查看当前项目的阶段总结与最终总结。</p>
+              </div>
+              <RouterLink
+                :to="{
+                  name: 'summaries',
+                  query: { projectId: project.id },
+                }"
+              >
+                <el-button type="primary">
+                  查看项目总结
+                </el-button>
+              </RouterLink>
+            </div>
+          </el-tab-pane>
+
+          <el-tab-pane
+            v-if="canUseAiPlan"
+            label="AI 计划"
+            name="ai-plan"
+          >
+            <div
+              class="module-entry"
+              data-testid="project-ai-plan-entry"
+            >
+              <div>
+                <h3>AI 任务计划</h3>
+                <p>生成临时计划，人工审阅后导入为正式任务。</p>
+              </div>
+              <RouterLink
+                :to="{
+                  name: 'ai-task-plan',
+                  params: { projectId: project.id },
+                }"
+              >
+                <el-button type="primary">
+                  进入 AI 计划
+                </el-button>
+              </RouterLink>
+            </div>
           </el-tab-pane>
         </el-tabs>
       </template>
@@ -784,11 +848,36 @@ onMounted(() => {
   font-size: 14px;
 }
 
-.placeholder-note,
 .dialog-note {
   margin: 0 0 16px;
   color: var(--fs-color-text-secondary, #64748b);
   font-size: 14px;
+}
+
+.module-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--fs-color-border, #dbe3ee);
+  border-radius: 8px;
+}
+
+.module-entry h3,
+.module-entry p {
+  margin: 0;
+}
+
+.module-entry p {
+  margin-top: 6px;
+  color: var(--fs-color-text-secondary, #64748b);
+  font-size: 14px;
+}
+
+.module-entry a {
+  flex-shrink: 0;
+  text-decoration: none;
 }
 
 .transfer-owner-select {
@@ -824,6 +913,11 @@ onMounted(() => {
 
   .content-panel {
     padding: 16px;
+  }
+
+  .module-entry {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>
