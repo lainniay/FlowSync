@@ -304,7 +304,7 @@ public class ProjectService {
 			return List.of();
 		}
 		List<Long> projectIds = projects.stream().map(Project::getId).toList();
-		Map<Long, User> owners = userMapper.selectBatchIds(projects.stream()
+		Map<Long, User> owners = userMapper.selectByIds(projects.stream()
 			.map(Project::getOwnerId)
 			.distinct()
 			.toList()).stream().collect(Collectors.toMap(User::getId, owner -> owner));

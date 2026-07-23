@@ -339,7 +339,7 @@ public class TaskService {
 			}
 		}
 		Map<Long, User> users = new HashMap<>();
-		for (User user : userMapper.selectBatchIds(userIds)) {
+		for (User user : userMapper.selectByIds(userIds)) {
 			users.put(user.getId(), user);
 		}
 		Map<Long, Integer> progressByTaskId = latestProgress(tasks.stream()

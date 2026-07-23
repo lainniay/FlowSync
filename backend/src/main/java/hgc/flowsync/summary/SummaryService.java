@@ -167,7 +167,7 @@ public class SummaryService {
 			creatorIds.add(summary.getCreatedBy());
 		}
 		Map<Long, User> creators = new HashMap<>();
-		for (User creator : userMapper.selectBatchIds(creatorIds)) {
+		for (User creator : userMapper.selectByIds(creatorIds)) {
 			creators.put(creator.getId(), creator);
 		}
 		return summaries.stream()
