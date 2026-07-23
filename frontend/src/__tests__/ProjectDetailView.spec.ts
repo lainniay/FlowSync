@@ -156,6 +156,40 @@ describe('ProjectDetailView', () => {
     ).toBe(true)
   })
 
+  it('shows project task, summary, and AI plan entries for owner', async () => {
+    vi.mocked(getProject).mockResolvedValue(project)
+
+    const wrapper = mountProjectDetail()
+
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="project-tasks-entry"]').exists())
+      .toBe(true)
+    expect(wrapper.find('[data-testid="project-summaries-entry"]').exists())
+      .toBe(true)
+    expect(wrapper.find('[data-testid="project-ai-plan-entry"]').exists())
+      .toBe(true)
+    expect(wrapper.text()).not.toContain('将在后续接入')
+  })
+
+  it('hides AI plan entry when the project is archived', async () => {
+    vi.mocked(getProject).mockResolvedValue({
+      ...project,
+      archivedAt: '2026-07-23T00:00:00Z',
+    })
+
+    const wrapper = mountProjectDetail()
+
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="project-tasks-entry"]').exists())
+      .toBe(true)
+    expect(wrapper.find('[data-testid="project-summaries-entry"]').exists())
+      .toBe(true)
+    expect(wrapper.find('[data-testid="project-ai-plan-entry"]').exists())
+      .toBe(false)
+  })
+
   it('hides invitations tab for regular members', async () => {
     authState.currentUser = {
       ...authState.currentUser,
@@ -193,5 +227,7 @@ describe('ProjectDetailView', () => {
     expect(
       wrapper.find('project-invitations-panel-stub').exists(),
     ).toBe(true)
+    expect(wrapper.find('[data-testid="project-ai-plan-entry"]').exists())
+      .toBe(false)
   })
 })

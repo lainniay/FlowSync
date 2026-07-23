@@ -31,16 +31,16 @@ const adminMenu: readonly MenuItem[] = [
   { label: '工作台', path: '/overview' },
   { label: '用户管理', path: '/admin/users' },
   { label: '项目', path: '/projects' },
-  { label: '任务', path: '/tasks', disabled: true },
-  { label: '总结', path: '/summaries', disabled: true },
+  { label: '任务', path: '/tasks' },
+  { label: '总结', path: '/summaries' },
   { label: '个人中心', path: '/profile' },
 ]
 
 const userMenu: readonly MenuItem[] = [
   { label: '工作台', path: '/overview' },
   { label: '项目', path: '/projects' },
-  { label: '任务', path: '/tasks', disabled: true },
-  { label: '总结', path: '/summaries', disabled: true },
+  { label: '任务', path: '/tasks' },
+  { label: '总结', path: '/summaries' },
   { label: '收到的邀请', path: '/invitations' },
   { label: '个人中心', path: '/profile' },
 ]
@@ -62,6 +62,14 @@ const activeMenu = computed(() => {
 
   if (route.path.startsWith('/invitations')) {
     return '/invitations'
+  }
+
+  if (route.path.startsWith('/tasks')) {
+    return '/tasks'
+  }
+
+  if (route.path.startsWith('/summaries')) {
+    return '/summaries'
   }
 
   return route.path === '/'
@@ -104,9 +112,6 @@ async function handleLogout(): Promise<void> {
         </el-menu-item>
       </el-menu>
 
-      <p class="menu-note">
-        灰色菜单将在对应业务模块接入后启用。
-      </p>
     </aside>
 
     <section class="app-workspace">
@@ -194,13 +199,6 @@ async function handleLogout(): Promise<void> {
   border-right: 0;
 }
 
-.menu-note {
-  margin: 0;
-  padding: 16px 20px;
-  color: var(--fs-color-text-secondary, #64748b);
-  font-size: 12px;
-  line-height: 1.5;
-}
 
 .app-workspace {
   min-width: 0;
