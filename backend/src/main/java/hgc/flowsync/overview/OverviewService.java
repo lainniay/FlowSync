@@ -1,6 +1,5 @@
 package hgc.flowsync.overview;
 
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
@@ -17,10 +16,7 @@ import hgc.flowsync.project.ProjectAccessService;
 import hgc.flowsync.project.ProjectMapper;
 import hgc.flowsync.project.ProjectMember;
 import hgc.flowsync.project.ProjectMemberMapper;
-import hgc.flowsync.summary.Summary;
 import hgc.flowsync.summary.SummaryMapper;
-import hgc.flowsync.task.Task;
-import hgc.flowsync.task.TaskLog;
 import hgc.flowsync.task.TaskLogMapper;
 import hgc.flowsync.task.TaskMapper;
 import hgc.flowsync.task.TaskStatus;
@@ -71,17 +67,11 @@ public class OverviewService {
 			throw new BusinessException(ErrorCode.NOT_FOUND);
 		}
 		if (projects.isEmpty()) {
-			return response(projects, List.of(), List.of(), List.of());
+			return response(projects, List.of());
 		}
 
 		List<Long> projectIds = projects.stream().map(Project::getId).toList();
-		List<Task> tasks = taskMapper.selectList(Wrappers.<Task>lambdaQuery()
-			.in(Task::getProjectId, projectIds));
-		List<Summary> summaries = summaryMapper.selectList(Wrappers.<Summary>lambdaQuery()
-			.in(Summary::getProjectId, projectIds));
-		List<ProjectMember> members = projectMemberMapper.selectList(Wrappers.<ProjectMember>lambdaQuery()
-			.in(ProjectMember::getProjectId, projectIds));
-		return response(projects, tasks, summaries, members);
+		return response(projects, projectIds);
 	}
 
 	private List<Project> visibleProjects(User currentUser, Long requestedProjectId) {
@@ -95,75 +85,82 @@ public class OverviewService {
 			.map(ProjectMember::getProjectId)
 			.filter(id -> requestedProjectId == null || requestedProjectId.equals(id))
 			.toList();
-		return projectIds.isEmpty() ? List.of() : projectMapper.selectBatchIds(projectIds);
+		return projectIds.isEmpty() ? List.of() : projectMapper.selectByIds(projectIds);
 	}
 
 	private OverviewResponse response(
 		List<Project> projects,
-		List<Task> tasks,
-		List<Summary> summaries,
-		List<ProjectMember> members) {
+		List<Long> projectIds) {
 		Map<TaskStatus, Long> tasksByStatus = new EnumMap<>(TaskStatus.class);
 		for (TaskStatus status : TaskStatus.values()) {
 			tasksByStatus.put(status, 0L);
 		}
-		tasks.forEach(task -> tasksByStatus.merge(task.getStatus(), 1L, Long::sum));
-		long overdueTasks = tasks.stream().filter(OverviewService::isOverdue).count();
-		long memberCount = members.stream().map(ProjectMember::getUserId).distinct().count();
+		long overdueTasks = 0;
+		for (TaskMapper.OverviewTaskStats stats
+			: taskMapper.selectOverviewStats(projectIds, ApiDateTime.today())) {
+			tasksByStatus.put(stats.getStatus(), stats.getTaskCount());
+			overdueTasks += stats.getOverdueCount();
+		}
+		long taskCount = tasksByStatus.values().stream().mapToLong(Long::longValue).sum();
 
 		return new OverviewResponse(
 			new OverviewResponse.Counts(
 				projects.size(),
-				tasks.size(),
+				taskCount,
 				tasksByStatus.get(TaskStatus.COMPLETED),
 				overdueTasks,
-				summaries.size(),
-				memberCount),
+				summaryMapper.countByProjectIds(projectIds),
+				projectMemberMapper.countDistinctUsersByProjectIds(projectIds)),
 			java.util.Arrays.stream(TaskStatus.values())
 				.map(status -> new OverviewResponse.StatusCount(status, tasksByStatus.get(status)))
 				.toList(),
-			recentActivities(projects, tasks, summaries));
+			recentActivities(projects, projectIds));
 	}
 
 	private List<OverviewResponse.Activity> recentActivities(
 		List<Project> projects,
-		List<Task> tasks,
-		List<Summary> summaries) {
+		List<Long> projectIds) {
 		List<OverviewResponse.Activity> activities = new ArrayList<>();
-		projects.forEach(project -> activities.add(new OverviewResponse.Activity(
+		projects.stream()
+			.sorted(Comparator.comparing(Project::getCreatedAt).reversed()
+				.thenComparing(Project::getId, Comparator.reverseOrder()))
+			.limit(10)
+			.forEach(project -> activities.add(new OverviewResponse.Activity(
 			"PROJECT_CREATED",
 			project.getId().toString(),
 			"Created project \"" + project.getName() + "\".",
 			ApiDateTime.toInstant(project.getCreatedAt()))));
-		tasks.forEach(task -> activities.add(new OverviewResponse.Activity(
+		taskMapper.selectRecentByProjectIds(projectIds).forEach(task -> activities.add(
+			new OverviewResponse.Activity(
 			"TASK_CREATED",
 			task.getId().toString(),
 			"Created task \"" + task.getTitle() + "\".",
 			ApiDateTime.toInstant(task.getCreatedAt()))));
-		summaries.forEach(summary -> activities.add(new OverviewResponse.Activity(
+		summaryMapper.selectRecentByProjectIds(projectIds).forEach(summary -> activities.add(
+			new OverviewResponse.Activity(
 			"SUMMARY_CREATED",
 			summary.getId().toString(),
 			"Created project summary.",
 			ApiDateTime.toInstant(summary.getCreatedAt()))));
 
-		if (!tasks.isEmpty()) {
-			Map<Long, Task> tasksById = tasks.stream().collect(Collectors.toMap(Task::getId, Function.identity()));
-			List<TaskLog> taskLogs = taskLogMapper.selectList(Wrappers.<TaskLog>lambdaQuery()
-				.in(TaskLog::getTaskId, tasksById.keySet()));
-			Map<Long, User> operators = users(taskLogs.stream().map(TaskLog::getOperatorId).distinct().toList());
-			for (TaskLog taskLog : taskLogs) {
-				Task task = tasksById.get(taskLog.getTaskId());
+		List<TaskLogMapper.RecentActivity> taskLogs = taskLogMapper.selectRecentActivities(projectIds);
+		if (!taskLogs.isEmpty()) {
+			Map<Long, User> operators = users(taskLogs.stream()
+				.map(TaskLogMapper.RecentActivity::getOperatorId).distinct().toList());
+			for (TaskLogMapper.RecentActivity taskLog : taskLogs) {
 				User operator = operators.get(taskLog.getOperatorId());
 				activities.add(new OverviewResponse.Activity(
 					"TASK_PROGRESS_ADDED",
 					taskLog.getId().toString(),
-					operator.getDisplayName() + " updated \"" + task.getTitle()
+					operator.getDisplayName() + " updated \"" + taskLog.getTaskTitle()
 						+ "\" progress to " + taskLog.getProgressPercent() + "%.",
 					ApiDateTime.toInstant(taskLog.getCreatedAt())));
 			}
 		}
 		return activities.stream()
-			.sorted(Comparator.comparing(OverviewResponse.Activity::occurredAt).reversed())
+			.sorted(Comparator.comparing(OverviewResponse.Activity::occurredAt).reversed()
+				.thenComparing(OverviewResponse.Activity::type)
+				.thenComparing(OverviewResponse.Activity::resourceId, Comparator.reverseOrder()))
 			.limit(10)
 			.toList();
 	}
@@ -172,14 +169,8 @@ public class OverviewService {
 		if (userIds.isEmpty()) {
 			return Map.of();
 		}
-		return userMapper.selectBatchIds(userIds).stream()
+		return userMapper.selectByIds(userIds).stream()
 			.collect(Collectors.toMap(User::getId, Function.identity()));
 	}
 
-	private static boolean isOverdue(Task task) {
-		return task.getDueDate() != null
-			&& task.getDueDate().isBefore(LocalDate.now())
-			&& task.getStatus() != TaskStatus.COMPLETED
-			&& task.getStatus() != TaskStatus.CANCELLED;
-	}
 }

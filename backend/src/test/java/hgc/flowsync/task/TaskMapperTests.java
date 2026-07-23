@@ -120,9 +120,15 @@ class TaskMapperTests {
 			.isFalse();
 		assertThat(taskMapper.existsIncompleteByProjectIdAndAssigneeId(Long.MAX_VALUE, assignee.getId()))
 			.isFalse();
-		assertThat(taskMapper.countByProjectId(project.getId())).isEqualTo(2);
-		assertThat(taskMapper.countCompletedByProjectId(project.getId())).isOne();
-		assertThat(taskMapper.countByProjectId(Long.MAX_VALUE)).isZero();
+		assertThat(taskMapper.selectProjectStats(null)).isEmpty();
+		assertThat(taskMapper.selectProjectStats(List.of())).isEmpty();
+		assertThat(taskMapper.selectProjectStats(List.of(project.getId(), Long.MAX_VALUE)))
+			.singleElement()
+			.satisfies(stats -> {
+				assertThat(stats.getProjectId()).isEqualTo(project.getId());
+				assertThat(stats.getTotal()).isEqualTo(2);
+				assertThat(stats.getCompleted()).isOne();
+			});
 	}
 
 	@Test

@@ -213,7 +213,7 @@ public class TaskService {
 					updateStatusOnce(authentication, taskId, status));
 			} catch (StaleTaskAssigneeException exception) {
 				if (attempt == 2) {
-					throw new BusinessException(ErrorCode.VALIDATION_ERROR);
+					throw new BusinessException(ErrorCode.TASK_ASSIGNEE_CHANGED);
 				}
 			}
 		}
@@ -339,7 +339,7 @@ public class TaskService {
 			}
 		}
 		Map<Long, User> users = new HashMap<>();
-		for (User user : userMapper.selectBatchIds(userIds)) {
+		for (User user : userMapper.selectByIds(userIds)) {
 			users.put(user.getId(), user);
 		}
 		Map<Long, Integer> progressByTaskId = latestProgress(tasks.stream()

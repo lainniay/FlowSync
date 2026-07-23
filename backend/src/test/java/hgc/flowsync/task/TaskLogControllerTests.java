@@ -142,7 +142,7 @@ class TaskLogControllerTests {
 			.andExpect(jsonPath("$.items[0].createdAt")
 				.value(ApiDateTime.toInstant(LocalDateTime.of(2026, 7, 17, 11, 0)).toString()))
 			.andExpect(jsonPath("$.items[0].operatorId").doesNotExist());
-		verify(userMapper, times(1)).selectBatchIds(anyCollection());
+		verify(userMapper, times(1)).selectByIds(anyCollection());
 
 		logRequest(get("/api/tasks/" + task.getId() + "/logs"), login(admin), null)
 			.andExpect(status().isOk())
@@ -344,6 +344,9 @@ class TaskLogControllerTests {
 			"{\"progressPercent\":20,\"content\":\"" + "x".repeat(1001) + "\"}")) {
 			assertProblem(logRequest(post(path), session, body), 422, "VALIDATION_ERROR");
 		}
+		assertProblem(logRequest(post(path), session,
+			"{\"progressPercent\":101,\"content\":\"high\"}"), 422, "VALIDATION_ERROR")
+			.andExpect(jsonPath("$.errors[0].field").value("progressPercent"));
 		assertProblem(logRequest(post(path), session, "[]"), 400, "BAD_REQUEST");
 		assertProblem(logRequest(post(path), session, "\"not an object\""), 400, "BAD_REQUEST");
 

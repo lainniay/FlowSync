@@ -31,7 +31,7 @@
   - 批量操作：必须放在同一个事务中；任意一条失败时，整批回滚，不能部分成功。
   - 已完成：`ProjectMemberService` 转换 `MEMBER_ALREADY_EXISTS`，
     `ProjectInvitationService` 转换 `INVITATION_ALREADY_PENDING`，成员和邀请批量写入已使用事务。
-  - 已完成：成员移除和项目永久删除转换 `DataIntegrityViolationException`，并覆盖引用阻止删除与
+  - 已完成：任务删除和项目永久删除转换 `DataIntegrityViolationException`，并覆盖引用阻止删除与
     事务回滚测试。
   - 完成标准：上述重复写入均返回约定的 `409` Problem Details；未识别的数据库故障仍返回
     `500 INTERNAL_SERVER_ERROR`；批量失败后数据库没有残留的部分写入。
@@ -45,7 +45,7 @@
   - 已完成成员直接添加、邀请创建、邀请状态转换、成员移除和项目永久删除。
 - [x] 实现 `POST /api/projects/{projectId}/ai/task-plans/imports`，只持久化 owner 人工审阅后
   确认的 Task，并保证批量校验和写入事务性。
-- [ ] AI Provider 集成实现任务建议和任务计划生成，产生 `RATE_LIMITED` 和
+- [x] AI Provider 集成实现任务建议和任务计划生成，产生 `RATE_LIMITED` 和
   `AI_PROVIDER_ERROR`，且不把 AI 提供商的原始异常返回客户端。
 
 - [x] 实现 `PUT /api/users/{userId}`。

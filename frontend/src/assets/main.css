@@ -1,13 +1,33 @@
-:root {
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
   --fs-color-primary: #2563eb;
+  --fs-color-primary-hover: #1d4ed8;
+  --fs-color-primary-soft: #eff6ff;
   --fs-color-success: #16a34a;
   --fs-color-warning: #d97706;
   --fs-color-danger: #dc2626;
+  --fs-color-info: #475569;
   --fs-color-text: #1f2937;
   --fs-color-text-secondary: #64748b;
+  --fs-color-text-disabled: #94a3b8;
   --fs-color-page: #f4f7fb;
   --fs-color-surface: #ffffff;
+  --fs-color-surface-muted: #f8fafc;
   --fs-color-border: #dbe3ee;
+  --fs-color-border-strong: #c7d2e0;
+  --fs-color-success-soft: #ecfdf3;
+  --fs-color-warning-soft: #fffbeb;
+  --fs-color-danger-soft: #fef2f2;
+  --fs-color-info-soft: #f1f5f9;
+  --fs-color-on-primary: #ffffff;
+
+  --fs-switch-border: var(--fs-color-border);
+  --fs-switch-bg: rgba(142, 150, 170, 0.14);
+  --fs-switch-thumb: #ffffff;
+  --fs-switch-icon: var(--fs-color-text-secondary);
+  --fs-switch-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 
   --fs-radius-sm: 4px;
   --fs-radius-md: 8px;
@@ -25,7 +45,63 @@
   --el-color-success: var(--fs-color-success);
   --el-color-warning: var(--fs-color-warning);
   --el-color-danger: var(--fs-color-danger);
+  --el-bg-color: var(--fs-color-surface);
+  --el-bg-color-page: var(--fs-color-page);
+  --el-text-color-primary: var(--fs-color-text);
+  --el-text-color-regular: var(--fs-color-text-secondary);
+  --el-border-color: var(--fs-color-border);
+  --el-border-color-light: var(--fs-color-border);
+  --el-fill-color-blank: var(--fs-color-surface);
+}
 
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --fs-color-primary: #7c9fd9;
+  --fs-color-primary-hover: #94b3e6;
+  --fs-color-primary-soft: rgba(124, 159, 217, 0.12);
+  --fs-color-success: #4ade80;
+  --fs-color-warning: #fbbf24;
+  --fs-color-danger: #f87171;
+  --fs-color-info: #9ca3af;
+  --fs-color-text: #e5e5e5;
+  --fs-color-text-secondary: #a3a3a3;
+  --fs-color-text-disabled: #737373;
+  --fs-color-page: #212121;
+  --fs-color-surface: #2a2a2a;
+  --fs-color-surface-muted: #303030;
+  --fs-color-border: #383838;
+  --fs-color-border-strong: #484848;
+  --fs-color-success-soft: rgba(74, 222, 128, 0.12);
+  --fs-color-warning-soft: rgba(251, 191, 36, 0.12);
+  --fs-color-danger-soft: rgba(248, 113, 113, 0.12);
+  --fs-color-info-soft: rgba(163, 163, 163, 0.12);
+  --fs-color-on-primary: #fafafa;
+
+  --fs-switch-border: var(--fs-color-border);
+  --fs-switch-bg: rgba(163, 163, 163, 0.14);
+  --fs-switch-thumb: #383838;
+  --fs-switch-icon: #e5e5e5;
+  --fs-switch-shadow: 0 1px 2px rgba(0, 0, 0, 0.32);
+
+  --el-color-primary: var(--fs-color-primary);
+  --el-color-success: var(--fs-color-success);
+  --el-color-warning: var(--fs-color-warning);
+  --el-color-danger: var(--fs-color-danger);
+  --el-bg-color: var(--fs-color-surface);
+  --el-bg-color-page: var(--fs-color-page);
+  --el-bg-color-overlay: var(--fs-color-surface);
+  --el-fill-color-light: var(--fs-color-surface-muted);
+  --el-fill-color-lighter: var(--fs-color-surface-muted);
+  --el-fill-color-blank: var(--fs-color-surface);
+  --el-text-color-primary: var(--fs-color-text);
+  --el-text-color-regular: var(--fs-color-text-secondary);
+  --el-border-color: var(--fs-color-border);
+  --el-border-color-light: var(--fs-color-border);
+  --el-border-color-lighter: var(--fs-color-border);
+}
+
+:root {
   color: var(--fs-color-text);
   background: var(--fs-color-page);
   font-family:
@@ -50,6 +126,7 @@ body {
   min-height: 100vh;
   margin: 0;
   background: var(--fs-color-page);
+  color: var(--fs-color-text);
 }
 
 #app {

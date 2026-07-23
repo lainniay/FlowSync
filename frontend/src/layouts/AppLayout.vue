@@ -15,6 +15,7 @@ import 'element-plus/es/components/message/style/css'
 import 'element-plus/es/components/tag/style/css'
 
 import { useAuthStore } from '@/stores/auth'
+import ThemeSwitcher from '@/components/ThemeSwitcher.vue'
 
 type MenuItem = {
   label: string
@@ -28,20 +29,20 @@ const authStore = useAuthStore()
 
 const adminMenu: readonly MenuItem[] = [
   { label: '工作台', path: '/overview' },
-  { label: '用户管理', path: '/admin/users', disabled: true },
+  { label: '用户管理', path: '/admin/users' },
   { label: '项目', path: '/projects' },
-  { label: '任务', path: '/tasks', disabled: true },
-  { label: '总结', path: '/summaries', disabled: true },
-  { label: '个人中心', path: '/profile', disabled: true },
+  { label: '任务', path: '/tasks' },
+  { label: '总结', path: '/summaries' },
+  { label: '个人中心', path: '/profile' },
 ]
 
 const userMenu: readonly MenuItem[] = [
   { label: '工作台', path: '/overview' },
   { label: '项目', path: '/projects' },
-  { label: '任务', path: '/tasks', disabled: true },
-  { label: '总结', path: '/summaries', disabled: true },
-  { label: '收到的邀请', path: '/invitations', disabled: true },
-  { label: '个人中心', path: '/profile', disabled: true },
+  { label: '任务', path: '/tasks' },
+  { label: '总结', path: '/summaries' },
+  { label: '收到的邀请', path: '/invitations' },
+  { label: '个人中心', path: '/profile' },
 ]
 
 const menuItems = computed(() => (
@@ -53,6 +54,22 @@ const menuItems = computed(() => (
 const activeMenu = computed(() => {
   if (route.path.startsWith('/projects')) {
     return '/projects'
+  }
+
+  if (route.path.startsWith('/admin/users')) {
+    return '/admin/users'
+  }
+
+  if (route.path.startsWith('/invitations')) {
+    return '/invitations'
+  }
+
+  if (route.path.startsWith('/tasks')) {
+    return '/tasks'
+  }
+
+  if (route.path.startsWith('/summaries')) {
+    return '/summaries'
   }
 
   return route.path === '/'
@@ -95,9 +112,6 @@ async function handleLogout(): Promise<void> {
         </el-menu-item>
       </el-menu>
 
-      <p class="menu-note">
-        灰色菜单将在对应业务模块接入后启用。
-      </p>
     </aside>
 
     <section class="app-workspace">
@@ -106,29 +120,33 @@ async function handleLogout(): Promise<void> {
           小组任务协同管理系统
         </p>
 
-        <div v-if="authStore.currentUser" class="user-area">
-          <div class="user-copy">
-            <strong>{{ authStore.currentUser.displayName }}</strong>
-            <span>@{{ authStore.currentUser.username }}</span>
+        <div class="header-actions">
+          <ThemeSwitcher />
+
+          <div v-if="authStore.currentUser" class="user-area">
+            <div class="user-copy">
+              <strong>{{ authStore.currentUser.displayName }}</strong>
+              <span>@{{ authStore.currentUser.username }}</span>
+            </div>
+
+            <el-tag
+              :type="
+                authStore.currentUser.systemRole === 'ADMIN'
+                  ? 'danger'
+                  : 'success'
+              "
+              effect="plain"
+            >
+              {{ authStore.currentUser.systemRole }}
+            </el-tag>
+
+            <el-button
+              :loading="authStore.loading"
+              @click="handleLogout"
+            >
+              退出
+            </el-button>
           </div>
-
-          <el-tag
-            :type="
-              authStore.currentUser.systemRole === 'ADMIN'
-                ? 'danger'
-                : 'success'
-            "
-            effect="plain"
-          >
-            {{ authStore.currentUser.systemRole }}
-          </el-tag>
-
-          <el-button
-            :loading="authStore.loading"
-            @click="handleLogout"
-          >
-            退出
-          </el-button>
         </div>
       </header>
 
@@ -172,7 +190,7 @@ async function handleLogout(): Promise<void> {
   height: 30px;
   border-radius: 8px;
   background: var(--fs-color-primary, #2563eb);
-  color: #fff;
+  color: var(--fs-color-on-primary, #fff);
   place-items: center;
 }
 
@@ -181,13 +199,6 @@ async function handleLogout(): Promise<void> {
   border-right: 0;
 }
 
-.menu-note {
-  margin: 0;
-  padding: 16px 20px;
-  color: var(--fs-color-text-secondary, #64748b);
-  font-size: 12px;
-  line-height: 1.5;
-}
 
 .app-workspace {
   min-width: 0;
@@ -207,6 +218,12 @@ async function handleLogout(): Promise<void> {
   margin: 0;
   color: var(--fs-color-text-secondary, #64748b);
   font-size: 14px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .user-area {

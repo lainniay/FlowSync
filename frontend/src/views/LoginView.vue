@@ -19,6 +19,7 @@ import 'element-plus/es/components/form-item/style/css'
 import 'element-plus/es/components/input/style/css'
 
 import { getSafeRedirect } from '@/router/navigation'
+import ThemeSwitcher from '@/components/ThemeSwitcher.vue'
 import { useAuthStore } from '@/stores/auth'
 
 type LoginFormModel = {
@@ -76,6 +77,10 @@ async function handleLogin(): Promise<void> {
 
 <template>
   <main class="login-page">
+    <div class="login-toolbar">
+      <ThemeSwitcher />
+    </div>
+
     <el-card class="login-card" shadow="never">
       <p class="eyebrow">小组任务协同管理系统</p>
       <h1>FlowSync</h1>
@@ -136,6 +141,13 @@ async function handleLogin(): Promise<void> {
   padding: 24px;
   background: var(--fs-color-page, #f4f7fb);
   place-items: center;
+}
+
+.login-toolbar {
+  position: fixed;
+  z-index: 10;
+  top: 16px;
+  right: 16px;
 }
 
 .login-card {

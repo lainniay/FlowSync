@@ -67,11 +67,11 @@ public class TaskLogController {
 
 	private static int parseProgressPercent(JsonNode value) {
 		if (value == null || !value.isIntegralNumber() || !value.canConvertToInt()) {
-			throw validationError();
+			throw new BusinessException(ErrorCode.VALIDATION_ERROR, "progressPercent");
 		}
 		int progressPercent = value.intValue();
 		if (progressPercent < 0 || progressPercent > 100) {
-			throw validationError();
+			throw new BusinessException(ErrorCode.VALIDATION_ERROR, "progressPercent");
 		}
 		return progressPercent;
 	}

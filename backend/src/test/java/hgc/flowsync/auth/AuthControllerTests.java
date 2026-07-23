@@ -9,6 +9,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -19,7 +20,9 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -38,6 +41,13 @@ class AuthControllerTests {
 	private final ObjectMapper objectMapper;
 	private final UserMapper userMapper;
 	private final PasswordEncoder passwordEncoder;
+
+	@AfterEach
+	void deleteCommittedUsers() {
+		if (!TestTransaction.isActive()) {
+			userMapper.delete(Wrappers.<User>lambdaQuery().likeRight(User::getUsername, "session-"));
+		}
+	}
 
 	@Autowired
 	AuthControllerTests(
@@ -115,14 +125,26 @@ class AuthControllerTests {
 	}
 
 	@Test
-	void emptyPasswordIsAnInvalidCredential() throws Exception {
+	void missingNullAndEmptyPasswordAreValidationErrors() throws Exception {
 		User user = insertUser(true);
 
 		login(newSession(), user.getUsername(), "")
-			.andExpect(status().isUnauthorized())
+			.andExpect(status().isUnprocessableEntity())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
-			.andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
-			.andExpect(jsonPath("$.errors").isEmpty());
+			.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+			.andExpect(jsonPath("$.errors[0].field").value("password"));
+		login(newSession(), user.getUsername(), null)
+			.andExpect(status().isUnprocessableEntity())
+			.andExpect(jsonPath("$.errors[0].field").value("password"));
+
+		LoginSession session = newSession();
+		mockMvc.perform(post("/api/auth/login")
+				.session(session.session())
+				.header(session.headerName(), session.token())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"username\":\"" + user.getUsername() + "\"}"))
+			.andExpect(status().isUnprocessableEntity())
+			.andExpect(jsonPath("$.errors[0].field").value("password"));
 	}
 
 	@Test
@@ -217,11 +239,16 @@ class AuthControllerTests {
 			.andExpect(status().isUnprocessableEntity())
 			.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
 			.andExpect(jsonPath("$.errors[0].field").value("email"));
+		updateProfile(loginSession, new UpdateProfileBody("Blank Phone", "", null))
+			.andExpect(status().isUnprocessableEntity())
+			.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+			.andExpect(jsonPath("$.errors[0].field").value("phone"));
 
 		assertThat(userMapper.selectById(user.getId()).getDisplayName()).isEqualTo("Session Test");
 	}
 
 	@Test
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	void changingPasswordInvalidatesEverySessionAndReplacesCredentials() throws Exception {
 		User user = insertUser(true);
 		LoginSession first = newSession();
@@ -323,6 +350,7 @@ class AuthControllerTests {
 	}
 
 	@Test
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	void adminResetReplacesCredentialsAndInvalidatesTargetSessions() throws Exception {
 		User admin = insertUser(true, SystemRole.ADMIN);
 		User target = insertUser(true);
@@ -504,6 +532,15 @@ class AuthControllerTests {
 			.andExpect(status().isUnprocessableEntity())
 			.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
 			.andExpect(jsonPath("$.errors[0].field").value("email"));
+		createUser(adminSession, new CreateUserBody(
+			"blank-phone-" + UUID.randomUUID(),
+			"initial-test-password",
+			"Blank Phone",
+			SystemRole.USER,
+			"",
+			null))
+			.andExpect(status().isUnprocessableEntity())
+			.andExpect(jsonPath("$.errors[0].field").value("phone"));
 	}
 
 	@Test

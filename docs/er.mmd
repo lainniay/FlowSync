@@ -1,0 +1,95 @@
+erDiagram
+    users {
+        BIGINT id PK
+        VARCHAR(50) username UK
+        VARCHAR(100) password_hash
+        VARCHAR(50) display_name
+        VARCHAR(20) phone "nullable"
+        VARCHAR(100) email "nullable"
+        VARCHAR(20) system_role "ADMIN or USER"
+        BOOLEAN active
+        DATETIME created_at
+        DATETIME updated_at
+    }
+
+    projects {
+        BIGINT id PK
+        BIGINT owner_id FK
+        VARCHAR(100) name
+        VARCHAR(2000) description "nullable"
+        VARCHAR(20) status "NOT_STARTED, IN_PROGRESS, COMPLETED"
+        VARCHAR(20) priority "LOW, MEDIUM, HIGH"
+        DATE start_date "nullable"
+        DATE end_date "nullable; end_date >= start_date"
+        DATETIME archived_at "nullable"
+        DATETIME created_at
+        DATETIME updated_at
+    }
+
+    project_members {
+        BIGINT id PK
+        BIGINT project_id FK "part of UNIQUE(project_id, user_id)"
+        BIGINT user_id FK "part of UNIQUE(project_id, user_id)"
+        DATETIME joined_at
+    }
+
+    project_invitations {
+        BIGINT id PK
+        BIGINT project_id FK "part of UNIQUE(project_id, invitee_id)"
+        BIGINT invitee_id FK "part of UNIQUE(project_id, invitee_id)"
+        BIGINT invited_by FK
+        VARCHAR(20) status "PENDING, ACCEPTED, REJECTED, CANCELLED"
+        DATETIME created_at
+        DATETIME responded_at "nullable"
+    }
+
+    tasks {
+        BIGINT id PK
+        BIGINT project_id FK
+        BIGINT parent_id FK "nullable; references tasks.id"
+        BIGINT assignee_id FK "nullable"
+        BIGINT creator_id FK
+        VARCHAR(100) title
+        VARCHAR(5000) description "nullable"
+        VARCHAR(20) status "NOT_STARTED, IN_PROGRESS, BLOCKED, COMPLETED, CANCELLED"
+        VARCHAR(20) priority "LOW, MEDIUM, HIGH"
+        DATE due_date "nullable"
+        DATETIME created_at
+        DATETIME updated_at
+    }
+
+    task_logs {
+        BIGINT id PK
+        BIGINT task_id FK
+        BIGINT operator_id FK
+        INT progress_percent "0 to 100"
+        VARCHAR(1000) content
+        DATETIME created_at
+    }
+
+    summaries {
+        BIGINT id PK
+        BIGINT project_id FK
+        BIGINT task_id FK "nullable"
+        BIGINT created_by FK
+        VARCHAR(20) type "STAGE or FINAL"
+        TEXT content
+        DATETIME created_at
+        DATETIME updated_at
+    }
+
+    users ||--o{ projects : owns
+    projects ||--|{ project_members : has
+    users ||--o{ project_members : participates
+    projects ||--o{ project_invitations : has
+    users ||--o{ project_invitations : receives
+    users ||--o{ project_invitations : sends
+    projects ||--o{ tasks : contains
+    tasks o|--o{ tasks : parent_of
+    users o|--o{ tasks : assigned_to
+    users ||--o{ tasks : creates
+    tasks ||--o{ task_logs : records
+    users ||--o{ task_logs : operates
+    projects ||--o{ summaries : has
+    tasks o|--o{ summaries : relates_to
+    users ||--o{ summaries : creates

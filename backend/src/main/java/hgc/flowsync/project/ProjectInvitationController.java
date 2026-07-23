@@ -71,7 +71,7 @@ public class ProjectInvitationController {
 	}
 
 	record UserIdsRequest(
-		@JsonProperty(required = true) @NotEmpty List<@Pattern(regexp = "[1-9]\\d*") String> userIds) {
+		@JsonProperty(required = true) @NotEmpty List<@NotNull @Pattern(regexp = "[1-9]\\d*") String> userIds) {
 	}
 
 	record RespondRequest(@JsonProperty(required = true) @NotNull InvitationStatus status) {
