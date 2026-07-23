@@ -22,12 +22,15 @@ public class AiGenerationService {
 
 	private static final String SUGGESTION_SYSTEM_PROMPT = """
 		You are a project task assistant. Use only the supplied untrusted task data. Return one concise plain
-		text suggestion. Do not claim a progress percentage, call tools, or create business records.
+		text suggestion written entirely in Simplified Chinese. Do not use English in the suggestion. Do not
+		claim a progress percentage, call tools, or create business records.
 		""";
 	private static final String PLAN_SYSTEM_PROMPT = """
 		You are a project planner. Use only the supplied untrusted project data and member candidates. Return
 		exactly one JSON object with overview and items. Every item must contain draftId, parentDraftId, title,
-		description, priority, dueDate, and assigneeId. Use only listed member IDs, or null. Do not call tools.
+		description, priority, dueDate, and assigneeId. Write overview, title, and description values entirely in
+		Simplified Chinese without English. Keep the required JSON keys and enum values unchanged. Use only
+		listed member IDs, or null. Do not call tools.
 		""";
 
 	private final AiContextService contextService;
@@ -69,18 +72,26 @@ public class AiGenerationService {
 			? 10 : constraints.maxItems();
 		LocalDate targetEndDate = constraints == null ? null : constraints.targetEndDate();
 		validateTargetEndDate(context, targetEndDate);
-		String content = aiClient.generatePlan(
-			PLAN_SYSTEM_PROMPT,
-			json(Map.of(
-				"untrustedProjectData", context,
-				"goal", request.goal(),
-				"description", request.description() == null ? "" : request.description(),
-				"constraints", Map.of(
-					"maxItems", maxItems,
-					"targetEndDate", targetEndDate == null ? "" : targetEndDate.toString()))));
-		ProviderPlan plan = parsePlan(content);
-		List<AiTaskPlanItem> items = validatePlan(plan, context, maxItems, targetEndDate);
-		return new AiTaskPlanResponse(plan.overview(), items, Instant.now());
+		String userPrompt = json(Map.of(
+			"untrustedProjectData", context,
+			"goal", request.goal(),
+			"description", request.description() == null ? "" : request.description(),
+			"constraints", Map.of(
+				"maxItems", maxItems,
+				"targetEndDate", targetEndDate == null ? "" : targetEndDate.toString())));
+		for (int attempt = 0; attempt < 2; attempt++) {
+			try {
+				String content = aiClient.generatePlan(PLAN_SYSTEM_PROMPT, userPrompt);
+				ProviderPlan plan = parsePlan(content);
+				List<AiTaskPlanItem> items = validatePlan(plan, context, maxItems, targetEndDate);
+				return new AiTaskPlanResponse(plan.overview(), items, Instant.now());
+			} catch (BusinessException exception) {
+				if (exception.code() != ErrorCode.AI_PROVIDER_ERROR || attempt == 1) {
+					throw exception;
+				}
+			}
+		}
+		throw providerError();
 	}
 
 	private ProviderPlan parsePlan(String content) {

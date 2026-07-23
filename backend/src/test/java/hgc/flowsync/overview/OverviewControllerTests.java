@@ -1,6 +1,7 @@
 package hgc.flowsync.overview;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import hgc.flowsync.common.time.ApiDateTime;
@@ -64,6 +65,8 @@ class OverviewControllerTests {
 	private SummaryMapper summaryMapper;
 	@Autowired
 	private PasswordEncoder passwordEncoder;
+	@Autowired
+	private AdminOverviewService adminOverviewService;
 
 	@Test
 	void memberOverviewCountsOnlyVisibleProjectsAndBuildsActivities() throws Exception {
@@ -71,11 +74,16 @@ class OverviewControllerTests {
 		User member = insertUser(SystemRole.USER);
 		User otherOwner = insertUser(SystemRole.USER);
 		Project visible = insertProject(owner, "Visible Overview");
+		visible.setStatus(ProjectStatus.IN_PROGRESS);
+		projectMapper.updateById(visible);
 		insertMember(visible, member);
 		Project hidden = insertProject(otherOwner, "Hidden Overview");
 		Task completed = insertTask(visible, member, TaskStatus.COMPLETED, ApiDateTime.today().minusDays(2));
 		Task overdue = insertTask(visible, member, TaskStatus.IN_PROGRESS, ApiDateTime.today().minusDays(1));
 		insertTask(visible, member, TaskStatus.CANCELLED, ApiDateTime.today().minusDays(1));
+		insertTask(visible, member, TaskStatus.IN_PROGRESS, ApiDateTime.today().plusDays(3));
+		insertTask(visible, member, TaskStatus.BLOCKED, ApiDateTime.today());
+		insertTask(visible, owner, TaskStatus.NOT_STARTED, null);
 		insertTask(hidden, otherOwner, TaskStatus.BLOCKED, null);
 		TaskLog taskLog = insertTaskLog(overdue, member);
 		insertSummary(visible, completed, owner);
@@ -84,23 +92,35 @@ class OverviewControllerTests {
 			.andExpect(status().isOk())
 			.andExpect(content().contentType(MediaType.APPLICATION_JSON))
 			.andExpect(jsonPath("$.counts.projects").value(1))
-			.andExpect(jsonPath("$.counts.tasks").value(3))
+			.andExpect(jsonPath("$.counts.inProgressProjects").value(1))
+			.andExpect(jsonPath("$.counts.tasks").value(5))
 			.andExpect(jsonPath("$.counts.completedTasks").value(1))
 			.andExpect(jsonPath("$.counts.overdueTasks").value(1))
+			.andExpect(jsonPath("$.counts.blockedTasks").value(1))
+			.andExpect(jsonPath("$.counts.dueSoonTasks").value(1))
+			.andExpect(jsonPath("$.counts.myOverdueTasks").value(1))
+			.andExpect(jsonPath("$.counts.myBlockedTasks").value(1))
+			.andExpect(jsonPath("$.counts.myTodayDueTasks").value(1))
 			.andExpect(jsonPath("$.counts.summaries").value(1))
 			.andExpect(jsonPath("$.counts.members").value(2))
 			.andExpect(jsonPath("$.tasksByStatus.length()").value(5))
 			.andExpect(jsonPath("$.tasksByStatus[0].status").value("NOT_STARTED"))
-			.andExpect(jsonPath("$.tasksByStatus[1].count").value(1))
+			.andExpect(jsonPath("$.tasksByStatus[1].count").value(2))
+			.andExpect(jsonPath("$.tasksByStatus[2].count").value(1))
 			.andExpect(jsonPath("$.tasksByStatus[3].count").value(1))
 			.andExpect(jsonPath("$.tasksByStatus[4].count").value(1))
+			.andExpect(jsonPath("$.projectHealth[0].name").value("Visible Overview"))
+			.andExpect(jsonPath("$.projectHealth[0].tasks").value(6))
+			.andExpect(jsonPath("$.projectHealth[0].completedTasks").value(1))
+			.andExpect(jsonPath("$.projectHealth[0].overdueTasks").value(1))
+			.andExpect(jsonPath("$.projectHealth[0].blockedTasks").value(1))
 			.andExpect(jsonPath("$.recentActivities.length()").value(6))
-			.andExpect(jsonPath("$.recentActivities[?(@.type == 'PROJECT_CREATED')]").exists())
+			.andExpect(jsonPath("$.recentActivities[?(@.type == 'PROJECT_CREATED')]").doesNotExist())
 			.andExpect(jsonPath("$.recentActivities[?(@.type == 'TASK_CREATED')]").exists())
 			.andExpect(jsonPath("$.recentActivities[?(@.type == 'TASK_PROGRESS_ADDED')]").exists())
 			.andExpect(jsonPath("$.recentActivities[?(@.type == 'TASK_PROGRESS_ADDED')].resourceId")
 				.value(contains(taskLog.getId().toString())))
-			.andExpect(jsonPath("$.recentActivities[?(@.type == 'SUMMARY_CREATED')]").exists())
+			.andExpect(jsonPath("$.recentActivities[?(@.type == 'SUMMARY_CREATED')]").doesNotExist())
 			.andExpect(jsonPath("$.recentActivities[0].occurredAt").isNotEmpty());
 	}
 
@@ -120,19 +140,62 @@ class OverviewControllerTests {
 	}
 
 	@Test
-	void adminCanFilterAnyProjectWhileUsersCannotFilterInvisibleProjects() throws Exception {
+	void projectHealthMarksAndPrioritizesProjectsOwnedByCurrentUser() throws Exception {
+		User currentUser = insertUser(SystemRole.USER);
+		User otherOwner = insertUser(SystemRole.USER);
+		Project participated = insertProject(otherOwner, "Participated Project");
+		insertMember(participated, currentUser);
+		Project owned = insertProject(currentUser, "Owned Project");
+
+		mockMvc.perform(get("/api/overview").session(login(currentUser)))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.projectHealth[0].id").value(owned.getId().toString()))
+			.andExpect(jsonPath("$.projectHealth[0].isOwner").value(true))
+			.andExpect(jsonPath("$.projectHealth[1].id").value(participated.getId().toString()))
+			.andExpect(jsonPath("$.projectHealth[1].isOwner").value(false));
+	}
+
+	@Test
+	void overviewExcludesArchivedProjectsAndTheirContent() throws Exception {
+		User owner = insertUser(SystemRole.USER);
+		User admin = insertUser(SystemRole.ADMIN);
+		Project current = insertProject(owner, "Current Overview");
+		Project archived = insertProject(owner, "Archived Overview");
+		archived.setArchivedAt(LocalDateTime.now());
+		projectMapper.updateById(archived);
+		insertTask(current, owner, TaskStatus.NOT_STARTED, null);
+		insertTask(archived, owner, TaskStatus.COMPLETED, null);
+
+		mockMvc.perform(get("/api/overview").session(login(owner)))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.counts.projects").value(1))
+			.andExpect(jsonPath("$.counts.tasks").value(1));
+		mockMvc.perform(get("/api/overview")
+				.param("projectId", current.getId().toString())
+				.session(login(admin)))
+			.andExpect(status().isNotFound());
+		mockMvc.perform(get("/api/overview")
+				.param("projectId", archived.getId().toString())
+				.session(login(admin)))
+			.andExpect(status().isNotFound());
+	}
+
+	@Test
+	void adminDashboardIsDeferredAndUsersCannotFilterInvisibleProjects() throws Exception {
 		User owner = insertUser(SystemRole.USER);
 		User outsider = insertUser(SystemRole.USER);
 		User admin = insertUser(SystemRole.ADMIN);
 		Project project = insertProject(owner, "Filtered Overview");
 		insertTask(project, owner, TaskStatus.NOT_STARTED, null);
 
+		mockMvc.perform(get("/api/overview").session(login(admin)))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.counts.projects").value(0))
+			.andExpect(jsonPath("$.counts.tasks").value(0));
 		mockMvc.perform(get("/api/overview")
 				.param("projectId", project.getId().toString())
 				.session(login(admin)))
-			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.counts.projects").value(1))
-			.andExpect(jsonPath("$.counts.tasks").value(1));
+			.andExpect(status().isNotFound());
 		mockMvc.perform(get("/api/overview")
 				.param("projectId", project.getId().toString())
 				.session(login(outsider)))
@@ -145,6 +208,39 @@ class OverviewControllerTests {
 	}
 
 	@Test
+	void adminOverviewReturnsSystemOperationsMetricsAndRejectsUsers() throws Exception {
+		AdminOverviewResponse.Counts baseline = adminOverviewService.overview().counts();
+		User admin = insertUser(SystemRole.ADMIN);
+		User owner = insertUser(SystemRole.USER);
+		User inactive = insertUser(SystemRole.USER);
+		inactive.setActive(false);
+		userMapper.updateById(inactive);
+		Project project = insertProject(owner, "Attention Project");
+		project.setStatus(ProjectStatus.IN_PROGRESS);
+		projectMapper.updateById(project);
+		insertTask(project, owner, TaskStatus.COMPLETED, ApiDateTime.today().minusDays(1));
+		insertTask(project, owner, TaskStatus.BLOCKED, ApiDateTime.today().minusDays(2));
+
+		mockMvc.perform(get("/api/admin/overview").session(login(admin)))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.counts.activeUsers").value(baseline.activeUsers() + 2))
+			.andExpect(jsonPath("$.counts.inactiveUsers").value(baseline.inactiveUsers() + 1))
+			.andExpect(jsonPath("$.counts.users").value(baseline.users() + 2))
+			.andExpect(jsonPath("$.counts.admins").value(baseline.admins() + 1))
+			.andExpect(jsonPath("$.counts.projects").value(baseline.projects() + 1))
+			.andExpect(jsonPath("$.counts.inProgressProjects").value(baseline.inProgressProjects() + 1))
+			.andExpect(jsonPath("$.counts.tasks").value(baseline.tasks() + 2))
+			.andExpect(jsonPath("$.counts.completedTasks").value(baseline.completedTasks() + 1))
+			.andExpect(jsonPath("$.counts.overdueTasks").value(baseline.overdueTasks() + 1))
+			.andExpect(jsonPath("$.counts.overdueProjects").value(baseline.overdueProjects() + 1))
+			.andExpect(jsonPath("$.focusProjects").isNotEmpty())
+			.andExpect(jsonPath("$.focusProjects[0].ownerName").isString())
+			.andExpect(jsonPath("$.recentActivities").isNotEmpty());
+		mockMvc.perform(get("/api/admin/overview").session(login(owner)))
+			.andExpect(status().isForbidden());
+	}
+
+	@Test
 	void emptyOverviewAndRequestValidationFollowTheContract() throws Exception {
 		User user = insertUser(SystemRole.USER);
 		MockHttpSession session = login(user);
@@ -153,6 +249,7 @@ class OverviewControllerTests {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.counts.projects").value(0))
 			.andExpect(jsonPath("$.tasksByStatus.length()").value(5))
+			.andExpect(jsonPath("$.projectHealth").isEmpty())
 			.andExpect(jsonPath("$.recentActivities").isEmpty());
 		mockMvc.perform(get("/api/overview").param("projectId", "0").session(session))
 			.andExpect(status().isUnprocessableEntity())

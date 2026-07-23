@@ -10,6 +10,8 @@ import type {
   ImportPlanResponse,
 } from './types'
 
+const AI_REQUEST_TIMEOUT = 120_000
+
 export async function getTaskSuggestion(
   body: AiSuggestionBody,
 ): Promise<AiSuggestionResponse> {
@@ -17,7 +19,7 @@ export async function getTaskSuggestion(
   const response = await http.post<AiSuggestionResponse>(
     '/ai/task-suggestions',
     body,
-    { headers },
+    { headers, timeout: AI_REQUEST_TIMEOUT },
   )
 
   return response.data
@@ -31,7 +33,7 @@ export async function generateTaskPlan(
   const response = await http.post<AiPlanResponse>(
     `/projects/${projectId}/ai/task-plans`,
     body,
-    { headers },
+    { headers, timeout: AI_REQUEST_TIMEOUT },
   )
 
   return response.data

@@ -1,6 +1,7 @@
 import type { Page, PaginationQuery } from './types'
 
 export const MAX_PAGE_SIZE = 100
+export const PAGE_SIZE = 20
 
 export async function fetchAllPages<T, Q extends PaginationQuery>(
   fetchPage: (query: Q) => Promise<Page<T>>,

@@ -97,6 +97,51 @@ public class ProjectInvitationService {
 	}
 
 	@Transactional(readOnly = true)
+	public List<InvitationCandidateResponse> findCandidates(
+		Authentication authentication,
+		Long projectId,
+		String query) {
+		String normalizedQuery = query.trim();
+		if (normalizedQuery.length() < 2) {
+			throw new BusinessException(ErrorCode.VALIDATION_ERROR, "q");
+		}
+		User currentUser = currentUserService.require(authentication);
+		Project project = projectAccessService.requireProject(projectId);
+		projectAccessService.requireOwner(project, currentUser);
+		projectAccessService.requireUnarchived(project);
+
+		List<Long> excludedUserIds = new ArrayList<>(projectMemberMapper
+			.selectList(Wrappers.<ProjectMember>lambdaQuery()
+				.select(ProjectMember::getUserId)
+				.eq(ProjectMember::getProjectId, projectId)).stream()
+			.map(ProjectMember::getUserId)
+			.toList());
+		excludedUserIds.addAll(projectInvitationMapper
+			.selectList(Wrappers.<ProjectInvitation>lambdaQuery()
+				.select(ProjectInvitation::getInviteeId)
+				.eq(ProjectInvitation::getProjectId, projectId)
+				.eq(ProjectInvitation::getStatus, InvitationStatus.PENDING)).stream()
+			.map(ProjectInvitation::getInviteeId)
+			.toList());
+
+		var userQuery = Wrappers.<User>lambdaQuery()
+			.eq(User::isActive, true)
+			.eq(User::getSystemRole, SystemRole.USER)
+			.and(wrapper -> wrapper
+				.like(User::getDisplayName, normalizedQuery)
+				.or()
+				.like(User::getUsername, normalizedQuery))
+			.orderByAsc(User::getDisplayName, User::getUsername)
+			.last("LIMIT 20");
+		if (!excludedUserIds.isEmpty()) {
+			userQuery.notIn(User::getId, excludedUserIds);
+		}
+		return userMapper.selectList(userQuery).stream()
+			.map(InvitationCandidateResponse::from)
+			.toList();
+	}
+
+	@Transactional(readOnly = true)
 	public List<ProjectInvitationResponse> findByProject(
 		Authentication authentication,
 		Long projectId) {

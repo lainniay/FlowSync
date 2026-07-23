@@ -6,4 +6,10 @@ export const profileRoutes: readonly RouteRecordRaw[] = [
     name: 'profile',
     component: () => import('@/views/profile/ProfileView.vue'),
   },
+  {
+    path: 'users/:userId/profile',
+    name: 'user-profile',
+    component: () => import('@/views/profile/UserProfileView.vue'),
+    props: true,
+  },
 ]

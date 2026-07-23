@@ -49,13 +49,24 @@ import 'element-plus/es/components/tag/style/css'
 
 const vLoading = ElLoading.directive
 
-import { getApiErrorMessage, hasApiStatus } from '@/shared/api/errors'
+import {
+  getApiErrorMessage,
+  getProblemDetails,
+  hasApiStatus,
+} from '@/shared/api/errors'
+import MaterialIcon from '@/components/MaterialIcon.vue'
+import ProjectLink from '@/components/ProjectLink.vue'
+import TaskLink from '@/components/TaskLink.vue'
+import UserLink from '@/components/UserLink.vue'
+import { formatDateTime } from '@/shared/format'
+import { fetchAllPages, PAGE_SIZE } from '@/shared/api/pagination'
 import type {
   Priority,
   TaskStatus,
 } from '@/shared/api/types'
 import { useAuthStore } from '@/stores/auth'
-import { getProject } from '@/views/projects/api'
+import { getProject, getProjectMembers } from '@/views/projects/api'
+import type { Project, ProjectMember } from '@/views/projects/types'
 
 import {
   createTaskLog,
@@ -101,7 +112,7 @@ type TagType =
 const statusLabels: Record<TaskStatus, string> = {
   NOT_STARTED: '未开始',
   IN_PROGRESS: '进行中',
-  BLOCKED: '阻塞',
+  BLOCKED: '阻塞中',
   COMPLETED: '已完成',
   CANCELLED: '已取消',
 }
@@ -128,6 +139,7 @@ const priorityTagTypes: Record<Priority, TagType> = {
 
 // --- Task data ---
 const task = ref<Task | null>(null)
+const project = ref<Project | null>(null)
 const parentTask = ref<Task | null>(null)
 const childTasks = ref<Task[]>([])
 const taskLoading = ref(false)
@@ -141,11 +153,20 @@ const projectArchived = ref<boolean | null>(null)
 
 // --- Logs ---
 const logs = ref<TaskLog[]>([])
+const latestLog = ref<TaskLog | null>(null)
 const logPage = ref(0)
-const logSize = ref(20)
 const logTotalElements = ref(0)
 const logsLoading = ref(false)
 const logsError = ref('')
+
+const latestProgress = computed(() => (
+  latestLog.value?.progressPercent ?? task.value?.progressPercent ?? 0
+))
+
+function progressColor(progressPercent: number): string {
+  const progress = Math.min(100, Math.max(0, progressPercent))
+  return `hsl(${Math.round(215 - progress * 0.7)} 72% 42%)`
+}
 
 // --- Permissions ---
 const isAdmin = computed(() => authStore.currentUser?.systemRole === 'ADMIN')
@@ -191,10 +212,11 @@ async function fetchTask(): Promise<void> {
     // Keep projectArchived as null when this context cannot be loaded,
     // so project-content write actions remain unavailable.
     try {
-      const project = await getProject(result.projectId)
-      projectOwner.value = project.owner
-      projectArchived.value = Boolean(project.archivedAt)
+      project.value = await getProject(result.projectId)
+      projectOwner.value = project.value.owner
+      projectArchived.value = Boolean(project.value.archivedAt)
     } catch {
+      project.value = null
       projectOwner.value = null
       projectArchived.value = null
     }
@@ -224,11 +246,9 @@ async function fetchTask(): Promise<void> {
 
 async function fetchChildren(): Promise<void> {
   try {
-    const result = await getTasks({
+    childTasks.value = [...await fetchAllPages(getTasks, {
       parentId: taskId.value,
-      size: 50,
-    })
-    childTasks.value = [...result.items]
+    })]
   } catch {
     childTasks.value = []
   }
@@ -242,10 +262,11 @@ async function fetchLogs(): Promise<void> {
   try {
     const result = await getTaskLogs(taskId.value, {
       page: logPage.value,
-      size: logSize.value,
+      size: PAGE_SIZE,
       sort: 'createdAt,desc',
     })
     logs.value = [...result.items]
+    if (logPage.value === 0) latestLog.value = result.items[0] ?? null
     logTotalElements.value = result.totalElements
   } catch (error) {
     logs.value = []
@@ -267,6 +288,9 @@ async function handleLogPageChange(displayedPage: number): Promise<void> {
 // --- Edit dialog ---
 const editDialogVisible = ref(false)
 const editSubmitting = ref(false)
+const editOptionsLoading = ref(false)
+const editMemberOptions = ref<ProjectMember[]>([])
+const editParentOptions = ref<Task[]>([])
 
 const editForm = reactive({
   parentId: '',
@@ -278,7 +302,7 @@ const editForm = reactive({
   dueDate: '',
 })
 
-function openEditDialog(): void {
+async function openEditDialog(): Promise<void> {
   if (!task.value) return
 
   editForm.parentId = task.value.parentId ?? ''
@@ -290,6 +314,23 @@ function openEditDialog(): void {
   editForm.dueDate = task.value.dueDate ?? ''
 
   editDialogVisible.value = true
+  editOptionsLoading.value = true
+  try {
+    const [members, parents] = await Promise.all([
+      getProjectMembers(task.value.projectId),
+      fetchAllPages(getTasks, {
+        projectId: task.value.projectId,
+        sort: 'title,asc',
+      }),
+    ])
+    editMemberOptions.value = [...members]
+    editParentOptions.value = parents.filter((candidate) => candidate.id !== taskId.value)
+  } catch {
+    editMemberOptions.value = []
+    editParentOptions.value = []
+  } finally {
+    editOptionsLoading.value = false
+  }
 }
 
 async function handleEdit(): Promise<void> {
@@ -347,21 +388,43 @@ async function handleStatusChange(): Promise<void> {
     ElMessage.success('任务状态已更新')
     statusDialogVisible.value = false
   } catch (error) {
-    ElMessage.error(
-      getApiErrorMessage(error, '更新状态失败，请稍后重试'),
-    )
+    if (getProblemDetails(error)?.code === 'TASK_ASSIGNEE_CHANGED') {
+      await fetchTask()
+      if (task.value) {
+        selectedStatus.value = task.value.status
+      }
+      ElMessage.error('任务负责人已变更，请确认后重试')
+    } else {
+      ElMessage.error(
+        getApiErrorMessage(error, '更新状态失败，请稍后重试'),
+      )
+    }
   } finally {
     statusSubmitting.value = false
   }
 }
 
 // --- Delete confirmation ---
-const deleteDialogVisible = ref(false)
 const deleteSubmitting = ref(false)
 
 async function handleDelete(): Promise<void> {
-  deleteSubmitting.value = true
+  if (!task.value || deleteSubmitting.value) return
 
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除任务「${task.value.title}」吗？该操作不可撤销`,
+      '删除任务',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'error',
+      },
+    )
+  } catch {
+    return
+  }
+
+  deleteSubmitting.value = true
   try {
     await deleteTask(taskId.value)
     ElMessage.success('任务已删除')
@@ -376,7 +439,6 @@ async function handleDelete(): Promise<void> {
         getApiErrorMessage(error, '删除任务失败，请稍后重试'),
       )
     }
-    deleteDialogVisible.value = false
   } finally {
     deleteSubmitting.value = false
   }
@@ -411,6 +473,7 @@ async function handleCreateLog(): Promise<void> {
     // Re-fetch task (progressPercent updates) and logs
     task.value = await getTask(taskId.value)
     addLogDialogVisible.value = false
+    logPage.value = 0
     await fetchLogs()
   } catch (error) {
     ElMessage.error(
@@ -455,30 +518,47 @@ import {
 } from '@/views/ai/api'
 
 const aiGenerating = ref(false)
+const aiDialogVisible = ref(false)
 const aiSuggestion = ref('')
+const aiErrorMessage = ref('')
 const aiProgressPercent = ref(0)
 const aiSubmitting = ref(false)
+let aiRequestId = 0
+
+function openAiSuggestionDialog(): void {
+  if (aiGenerating.value) return
+  aiDialogVisible.value = true
+  aiSuggestion.value = ''
+  aiErrorMessage.value = ''
+  aiProgressPercent.value = task.value?.progressPercent ?? 0
+  void handleAiSuggestion()
+}
 
 async function handleAiSuggestion(): Promise<void> {
+  const requestId = ++aiRequestId
   aiGenerating.value = true
+  aiErrorMessage.value = ''
 
   try {
     const result = await getTaskSuggestion({
       taskId: taskId.value,
     })
+    if (requestId !== aiRequestId) return
     aiSuggestion.value = result.suggestion
     aiProgressPercent.value = task.value?.progressPercent ?? 0
   } catch (error) {
-    ElMessage.error(
-      getApiErrorMessage(error, '获取 AI 建议失败，请稍后重试'),
-    )
+    if (requestId !== aiRequestId) return
+    aiErrorMessage.value = getApiErrorMessage(error, '获取 AI 建议失败，请稍后重试')
   } finally {
-    aiGenerating.value = false
+    if (requestId === aiRequestId) aiGenerating.value = false
   }
 }
 
 async function handleSubmitAiAsLog(): Promise<void> {
-  if (!aiSuggestion.value.trim()) return
+  if (!aiSuggestion.value.trim()) {
+    ElMessage.warning('建议内容不能为空')
+    return
+  }
 
   if (aiSuggestion.value.trim().length > 1000) {
     ElMessage.warning('进度内容不能超过 1000 个字符，请精简后再提交')
@@ -495,8 +575,9 @@ async function handleSubmitAiAsLog(): Promise<void> {
 
     await createTaskLog(taskId.value, body)
     ElMessage.success('AI 建议已提交为进度记录')
-    aiSuggestion.value = ''
+    aiDialogVisible.value = false
     task.value = await getTask(taskId.value)
+    logPage.value = 0
     await fetchLogs()
   } catch (error) {
     ElMessage.error(
@@ -508,26 +589,23 @@ async function handleSubmitAiAsLog(): Promise<void> {
 }
 
 function dismissAiSuggestion(): void {
-  aiSuggestion.value = ''
+  aiDialogVisible.value = false
 }
 
-function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+function resetAiSuggestionDialog(): void {
+  aiRequestId++
+  aiGenerating.value = false
+  aiSuggestion.value = ''
+  aiErrorMessage.value = ''
 }
 
 // --- Reset & reload on route change ---
 function resetDetailState(): void {
   editDialogVisible.value = false
   statusDialogVisible.value = false
-  deleteDialogVisible.value = false
   addLogDialogVisible.value = false
-  aiSuggestion.value = ''
+  aiDialogVisible.value = false
+  resetAiSuggestionDialog()
   task.value = null
   parentTask.value = null
   childTasks.value = []
@@ -537,6 +615,7 @@ function resetDetailState(): void {
   projectOwner.value = null
   projectArchived.value = null
   logs.value = []
+  latestLog.value = null
   logsError.value = ''
   logPage.value = 0
   logTotalElements.value = 0
@@ -546,10 +625,6 @@ async function loadDetailData(): Promise<void> {
   resetDetailState()
   await fetchTask()
   await fetchLogs()
-}
-
-function goBack(): void {
-  void router.push(getTaskListLocation())
 }
 
 onMounted(() => {
@@ -568,7 +643,7 @@ watch(
   <section class="task-detail-page">
     <template v-if="taskLoading && !taskLoaded">
       <div class="content-panel">
-        <el-skeleton animated :rows="8" />
+        <div aria-label="加载中" class="initial-loading-space" role="status" />
       </div>
     </template>
 
@@ -619,18 +694,44 @@ watch(
           </p>
           <h1>{{ task.title }}</h1>
           <div class="task-meta">
-            <span>项目 {{ task.projectId }}</span>
-            <span>创建者 {{ task.creator.displayName }}</span>
-            <span v-if="task.assignee">负责人 {{ task.assignee.displayName }}</span>
-            <span class="muted">更新于 {{ formatDateTime(task.updatedAt) }}</span>
+            <div class="task-meta-tags">
+              <el-tag :type="statusTagTypes[task.status]" effect="plain">
+                状态：{{ statusLabels[task.status] }}
+              </el-tag>
+              <el-tag :type="priorityTagTypes[task.priority]" effect="plain">
+                优先级：{{ priorityLabels[task.priority] }}
+              </el-tag>
+            </div>
+            <div class="task-meta-context">
+              <span>
+                所属项目：<ProjectLink v-if="project" :project-id="project.id">{{ project.name }}</ProjectLink>
+                <template v-else>不可用</template>
+              </span>
+              <span>
+                负责人：<UserLink v-if="task.assignee" :user-id="task.assignee.id">
+                  {{ task.assignee.displayName }}
+                </UserLink><template v-else>未委派</template>
+              </span>
+            </div>
           </div>
         </div>
 
         <div class="header-actions">
           <el-button
+            v-if="canUseAi"
+            data-testid="task-ai-suggestion-action"
+            type="primary"
+            @click="openAiSuggestionDialog"
+          >
+            <MaterialIcon name="auto_awesome" />
+            生成 AI 建议
+          </el-button>
+
+          <el-button
             v-if="canEdit"
             @click="openEditDialog"
           >
+            <MaterialIcon name="edit" />
             编辑
           </el-button>
 
@@ -638,123 +739,146 @@ watch(
             v-if="canChangeStatus"
             @click="openStatusDialog"
           >
+            <MaterialIcon name="sync_alt" />
             修改状态
           </el-button>
 
           <el-button
             v-if="canEdit"
+            :loading="deleteSubmitting"
             type="danger"
-            @click="deleteDialogVisible = true"
+            @click="handleDelete"
           >
+            <MaterialIcon name="delete" />
             删除
           </el-button>
         </div>
       </header>
 
-      <!-- Task info -->
-      <section class="content-panel">
-        <div class="tag-row">
-          <el-tag
-            :type="statusTagTypes[task.status]"
-            effect="plain"
-          >
-            {{ statusLabels[task.status] }}
-          </el-tag>
+      <section class="task-overview-grid">
+        <div class="task-overview-main">
+          <article class="task-overview-section latest-progress">
+            <div class="section-header">
+              <h3>最后记录进度</h3>
+              <strong>{{ latestProgress }}%</strong>
+            </div>
+            <div
+              class="progress-track"
+              role="progressbar"
+              aria-label="最后记录进度"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="latestProgress"
+            >
+              <span :style="{ width: `${latestProgress}%` }" />
+            </div>
+            <p class="latest-progress-content">
+              {{ latestLog?.content ?? '尚未记录进度' }}
+            </p>
+            <small v-if="latestLog" class="muted">
+              <UserLink :user-id="latestLog.operator.id">{{ latestLog.operator.displayName }}</UserLink>
+              · {{ formatDateTime(latestLog.createdAt) }}
+            </small>
+          </article>
 
-          <el-tag
-            :type="priorityTagTypes[task.priority]"
-            effect="plain"
-          >
-            {{ priorityLabels[task.priority] }}
-          </el-tag>
+          <article class="task-overview-section">
+            <h3>任务描述</h3>
+            <div class="description-text">
+              {{ task.description || '暂无描述' }}
+            </div>
+          </article>
 
-          <el-tag effect="plain" type="info">
-            进度 {{ task.progressPercent }}%
-          </el-tag>
-        </div>
-
-        <div
-          v-if="task.dueDate"
-          class="info-row"
-        >
-          <span class="label">截止日期</span>
-          <span>{{ task.dueDate }}</span>
-        </div>
-
-        <div class="info-section">
-          <h3>描述</h3>
-          <div class="description-text">
-            {{ task.description || '暂无描述' }}
-          </div>
-        </div>
-
-        <div
-          v-if="task.parentId"
-          class="info-row"
-        >
-          <span class="label">父任务</span>
-          <router-link
-            v-if="parentTask"
-            :to="`/tasks/${task.parentId}`"
-            class="task-link"
-          >
-            {{ parentTask.title }}
-          </router-link>
-          <span v-else>{{ task.parentId }}</span>
-        </div>
-
-        <div
-          v-if="childTasks.length > 0"
-          class="info-section"
-        >
-          <h3>子任务</h3>
-          <el-table
-            :data="childTasks"
-            row-key="id"
-            size="small"
-          >
-            <el-table-column label="标题" min-width="140">
-              <template #default="{ row }">
-                <router-link
-                  :to="`/tasks/${row.id}`"
-                  class="task-link"
-                >
-                  {{ row.title }}
-                </router-link>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="状态" width="100">
-              <template #default="{ row }">
-                <el-tag
-                  :type="statusTagTypes[(row as Task).status]"
-                  effect="plain"
-                  size="small"
-                >
-                  {{ statusLabels[(row as Task).status] }}
-                </el-tag>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="优先级" width="80">
-              <template #default="{ row }">
-                <el-tag
-                  :type="priorityTagTypes[(row as Task).priority]"
-                  effect="plain"
-                  size="small"
-                >
+          <article class="task-overview-section child-task-section">
+            <h3>子任务</h3>
+            <el-table
+              v-if="childTasks.length > 0"
+              :data="childTasks"
+              row-key="id"
+              size="small"
+            >
+              <el-table-column label="标题" min-width="140">
+                <template #default="{ row }">
+                  <TaskLink :task-id="row.id" :project-id="task.projectId">
+                    {{ row.title }}
+                  </TaskLink>
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag
+                    :type="statusTagTypes[(row as Task).status]"
+                    effect="plain"
+                    size="small"
+                  >
+                    {{ statusLabels[(row as Task).status] }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="优先级" width="80">
+                <template #default="{ row }">
                   {{ priorityLabels[(row as Task).priority] }}
-                </el-tag>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="负责人" width="100">
-              <template #default="{ row }">
-                {{ row.assignee?.displayName ?? '--' }}
-              </template>
-            </el-table-column>
-          </el-table>
+                </template>
+              </el-table-column>
+              <el-table-column label="负责人" width="100">
+                <template #default="{ row }">
+                  <UserLink v-if="row.assignee" :user-id="row.assignee.id">
+                    {{ row.assignee.displayName }}
+                  </UserLink>
+                  <span v-else>未委派</span>
+                </template>
+              </el-table-column>
+            </el-table>
+            <p v-else class="muted">暂无子任务</p>
+          </article>
         </div>
+
+        <aside class="task-information">
+          <h3>任务信息</h3>
+          <dl>
+            <div>
+              <dt>状态</dt>
+              <dd>{{ statusLabels[task.status] }}</dd>
+            </div>
+            <div>
+              <dt>优先级</dt>
+              <dd>{{ priorityLabels[task.priority] }}</dd>
+            </div>
+            <div>
+              <dt>负责人</dt>
+              <dd>
+                <UserLink v-if="task.assignee" :user-id="task.assignee.id">
+                  {{ task.assignee.displayName }}
+                </UserLink>
+                <span v-else>未委派</span>
+              </dd>
+            </div>
+            <div>
+              <dt>创建者</dt>
+              <dd><UserLink :user-id="task.creator.id">{{ task.creator.displayName }}</UserLink></dd>
+            </div>
+            <div>
+              <dt>原截止日期</dt>
+              <dd>{{ task.dueDate ?? '未设置' }}</dd>
+            </div>
+            <div>
+              <dt>更新时间</dt>
+              <dd>{{ formatDateTime(task.updatedAt) }}</dd>
+            </div>
+            <div v-if="task.parentId">
+              <dt>父任务</dt>
+              <dd>
+                <TaskLink
+                  v-if="parentTask"
+                  :task-id="task.parentId"
+                  :project-id="task.projectId"
+                >
+                  {{ parentTask.title }}
+                </TaskLink>
+                <span v-else>关联任务不可用</span>
+              </dd>
+            </div>
+          </dl>
+        </aside>
       </section>
 
       <!-- Task logs -->
@@ -765,9 +889,9 @@ watch(
           <el-button
             v-if="canCreateLog"
             type="primary"
-            size="small"
             @click="openAddLogDialog"
           >
+            <MaterialIcon name="add" :size="18" />
             新增日志
           </el-button>
         </div>
@@ -790,92 +914,80 @@ watch(
           </template>
         </el-alert>
 
-        <el-table
-          v-else
-          :data="logs"
-          row-key="id"
-          v-loading="logsLoading"
-        >
-          <el-table-column
-            label="操作人"
-            width="120"
-          >
-            <template #default="{ row }">
-              {{ row.operator.displayName }}
-            </template>
-          </el-table-column>
-
-          <el-table-column label="进度" width="100">
-            <template #default="{ row }">
-              {{ row.progressPercent }}%
-            </template>
-          </el-table-column>
-
-          <el-table-column label="内容" min-width="200">
-            <template #default="{ row }">
-              {{ row.content }}
-            </template>
-          </el-table-column>
-
-          <el-table-column label="时间" min-width="160">
-            <template #default="{ row }">
-              <span class="muted">{{ formatDateTime(row.createdAt) }}</span>
-            </template>
-          </el-table-column>
-
-          <el-table-column label="操作" width="80">
-            <template #default="{ row }">
-              <el-button
-                v-if="canDeleteLog(row as TaskLog)"
-                size="small"
-                type="danger"
-                text
-                @click="handleDeleteLog(row as TaskLog)"
-              >
-                删除
-              </el-button>
-            </template>
-          </el-table-column>
-
-          <template #empty>
-            <el-empty description="暂无进度记录" />
+        <div v-else v-loading="logsLoading" class="progress-timeline">
+          <el-empty v-if="logs.length === 0" description="暂无进度记录" />
+          <template v-else>
+            <article
+              v-for="log in logs"
+              :key="log.id"
+              class="progress-timeline-item"
+              :style="{ '--timeline-color': progressColor(log.progressPercent) }"
+            >
+              <div class="timeline-marker">
+                <span :class="{ complete: log.progressPercent === 100 }" />
+              </div>
+              <div class="timeline-content">
+                <header>
+                  <strong>{{ log.progressPercent }}%</strong>
+                  <UserLink :user-id="log.operator.id">{{ log.operator.displayName }}</UserLink>
+                </header>
+                <p>{{ log.content }}</p>
+                <footer>
+                  <time>{{ formatDateTime(log.createdAt) }}</time>
+                  <el-button
+                    v-if="canDeleteLog(log)"
+                    :aria-label="`删除 ${log.operator.displayName} 的进度记录`"
+                    size="small"
+                    type="danger"
+                    text
+                    @click="handleDeleteLog(log)"
+                  >
+                    <MaterialIcon name="delete" :size="16" />
+                    删除记录
+                  </el-button>
+                </footer>
+              </div>
+            </article>
           </template>
-        </el-table>
+        </div>
 
         <el-pagination
           v-if="logTotalElements > 0"
           class="task-pagination"
           :current-page="logPage + 1"
           layout="total, prev, pager, next"
-          :page-size="logSize"
+              :page-size="PAGE_SIZE"
           :total="logTotalElements"
           @current-change="handleLogPageChange"
         />
       </section>
 
-      <!-- AI suggestion -->
-      <section
-        v-if="canUseAi"
-        class="content-panel"
+      <el-dialog
+        v-model="aiDialogVisible"
+        align-center
+        destroy-on-close
+        :teleported="false"
+        title="AI 任务建议"
+        width="min(760px, 92vw)"
+        @closed="resetAiSuggestionDialog"
       >
-        <h3>AI 任务建议</h3>
-
-        <el-button
-          type="primary"
-          :loading="aiGenerating"
-          @click="handleAiSuggestion"
-        >
-          获取 AI 建议
-        </el-button>
-
-        <div
-          v-if="aiSuggestion"
-          class="ai-result"
-        >
+        <div v-if="aiGenerating" class="ai-loading" aria-label="AI 建议生成中">
+          <el-skeleton animated :rows="6" />
+        </div>
+        <div v-else-if="aiErrorMessage" class="feedback-state">
+          <el-alert
+            :closable="false"
+            :title="aiErrorMessage"
+            type="error"
+            show-icon
+          />
+          <el-button type="primary" @click="handleAiSuggestion">重新生成</el-button>
+        </div>
+        <div v-else-if="aiSuggestion" class="ai-result">
           <el-alert
             class="ai-hint"
             :closable="false"
-            title="AI 建议为临时内容，请人工审阅修改后再提交为进度记录。"
+            title="AI 建议为临时内容，请人工审阅修改后再提交为进度记录"
             type="warning"
             show-icon
           />
@@ -885,7 +997,7 @@ watch(
             <el-input
               v-model="aiSuggestion"
               maxlength="1000"
-              placeholder="编辑 AI 建议内容..."
+              placeholder="编辑 AI 建议内容"
               type="textarea"
               :rows="4"
             />
@@ -912,7 +1024,7 @@ watch(
             </div>
           </div>
         </div>
-      </section>
+      </el-dialog>
 
       <!-- Edit dialog -->
       <el-dialog
@@ -924,11 +1036,21 @@ watch(
           label-position="top"
           :model="editForm"
         >
-          <el-form-item label="父任务 ID">
-            <el-input
+          <el-form-item label="父任务">
+            <el-select
               v-model="editForm.parentId"
+              clearable
+              filterable
+              :loading="editOptionsLoading"
               placeholder="可选"
-            />
+            >
+              <el-option
+                v-for="candidate in editParentOptions"
+                :key="candidate.id"
+                :label="candidate.title"
+                :value="candidate.id"
+              />
+            </el-select>
           </el-form-item>
 
           <el-form-item label="标题" required>
@@ -949,11 +1071,21 @@ watch(
             />
           </el-form-item>
 
-          <el-form-item label="负责人 ID">
-            <el-input
+          <el-form-item label="负责人">
+            <el-select
               v-model="editForm.assigneeId"
+              clearable
+              filterable
+              :loading="editOptionsLoading"
               placeholder="可选"
-            />
+            >
+              <el-option
+                v-for="member in editMemberOptions"
+                :key="member.user.id"
+                :label="member.user.displayName"
+                :value="member.user.id"
+              />
+            </el-select>
           </el-form-item>
 
           <el-form-item label="状态">
@@ -963,7 +1095,7 @@ watch(
             >
               <el-option label="未开始" value="NOT_STARTED" />
               <el-option label="进行中" value="IN_PROGRESS" />
-              <el-option label="阻塞" value="BLOCKED" />
+              <el-option label="阻塞中" value="BLOCKED" />
               <el-option label="已完成" value="COMPLETED" />
               <el-option label="已取消" value="CANCELLED" />
             </el-select>
@@ -1019,7 +1151,7 @@ watch(
             >
               <el-option label="未开始" value="NOT_STARTED" />
               <el-option label="进行中" value="IN_PROGRESS" />
-              <el-option label="阻塞" value="BLOCKED" />
+              <el-option label="阻塞中" value="BLOCKED" />
               <el-option label="已完成" value="COMPLETED" />
               <el-option label="已取消" value="CANCELLED" />
             </el-select>
@@ -1037,29 +1169,6 @@ watch(
             @click="handleStatusChange"
           >
             保存
-          </el-button>
-        </template>
-      </el-dialog>
-
-      <!-- Delete confirmation -->
-      <el-dialog
-        v-model="deleteDialogVisible"
-        title="删除任务"
-        width="400px"
-      >
-        <p>确定要删除任务「{{ task.title }}」吗？该操作不可撤销。</p>
-
-        <template #footer>
-          <el-button @click="deleteDialogVisible = false">
-            取消
-          </el-button>
-
-          <el-button
-            type="danger"
-            :loading="deleteSubmitting"
-            @click="handleDelete"
-          >
-            确定删除
           </el-button>
         </template>
       </el-dialog>
@@ -1107,22 +1216,16 @@ watch(
       </el-dialog>
     </template>
 
-    <footer class="page-footer">
-      <el-button
-        class="back-button"
-        type="primary"
-        @click="goBack"
-      >
-        返回
-      </el-button>
-    </footer>
   </section>
 </template>
 
 <style scoped>
 .task-detail-page {
   display: grid;
+  min-width: 0;
   gap: 16px;
+  container-type: inline-size;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .breadcrumb {
@@ -1150,65 +1253,50 @@ watch(
   margin: 0;
   color: var(--fs-color-text, #1f2937);
   font-size: 24px;
+  overflow-wrap: anywhere;
+}
+
+.page-header > div:first-child {
+  min-width: 0;
 }
 
 .task-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
+  display: grid;
+  gap: 8px;
   margin-top: 8px;
   color: var(--fs-color-text-secondary, #64748b);
 }
 
+.task-meta-tags,
+.task-meta-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
 .header-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
   flex-shrink: 0;
 }
 
-.page-footer {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.back-button {
-  height: 43px;
-  padding: 0 20px;
-  font-size: 19px;
-}
-
 .content-panel {
+  min-width: 0;
   border: 1px solid var(--fs-color-border, #dbe3ee);
   border-radius: 8px;
   background: var(--fs-color-surface, #fff);
   padding: 20px;
+  overflow-x: auto;
 }
 
 .logs-error {
   margin-bottom: 12px;
 }
 
-.tag-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.info-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.label {
-  color: var(--fs-color-text-secondary, #64748b);
-}
-
-.info-section {
-  margin-top: 16px;
-}
-
-.info-section h3,
+.task-overview-section h3,
+.task-information h3,
 .section-header h3 {
   margin: 0 0 8px;
   font-size: 16px;
@@ -1226,19 +1314,95 @@ watch(
   margin: 0;
 }
 
-.description-text {
+.task-overview-grid {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--fs-color-border, #dbe3ee);
+  border-radius: 8px;
+  background: var(--fs-color-surface, #fff);
+  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.8fr);
+}
+
+.task-overview-main {
+  min-width: 0;
+}
+
+.task-overview-section,
+.task-information {
+  padding: 20px;
+}
+
+.task-overview-section:not(:last-child) {
+  border-bottom: 1px solid var(--fs-color-border, #dbe3ee);
+}
+
+.task-information {
+  border-left: 1px solid var(--fs-color-border, #dbe3ee);
+}
+
+.task-information dl {
+  display: grid;
+  gap: 16px;
+  margin: 20px 0 0;
+}
+
+.task-information dl div {
+  display: grid;
+  gap: 4px;
+}
+
+.task-information dt {
+  color: var(--fs-color-text-secondary, #64748b);
+  font-size: 13px;
+}
+
+.task-information dt::after {
+  content: '：';
+}
+
+.task-information dd {
+  margin: 0;
   color: var(--fs-color-text, #1f2937);
-  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.latest-progress .section-header strong {
+  color: var(--el-color-primary);
+  font-size: 20px;
+}
+
+.progress-track {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--el-color-primary-light-8);
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--el-color-primary);
+}
+
+.latest-progress-content {
+  margin: 16px 0 6px;
+  color: var(--fs-color-text, #1f2937);
   line-height: 1.6;
 }
 
-.task-link {
-  color: var(--fs-color-primary, #2563eb);
-  text-decoration: none;
+.child-task-section > .muted {
+  display: block;
+  margin: 12px 0 0;
 }
 
-.task-link:hover {
-  text-decoration: underline;
+.description-text {
+  max-width: 70ch;
+  color: var(--fs-color-text, #1f2937);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  line-height: 1.6;
 }
 
 .feedback-state {
@@ -1254,6 +1418,108 @@ watch(
   margin-top: 16px;
 }
 
+.progress-timeline {
+  min-height: 120px;
+}
+
+.progress-timeline-item {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  padding-bottom: 24px;
+  grid-template-columns: 18px minmax(0, 1fr);
+}
+
+.progress-timeline-item:last-child {
+  padding-bottom: 0;
+}
+
+.timeline-marker {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding-top: 5px;
+}
+
+.timeline-marker span {
+  z-index: 1;
+  width: 12px;
+  height: 12px;
+  border: 3px solid var(--fs-color-surface, #fff);
+  border-radius: 50%;
+  background: var(--timeline-color);
+  box-shadow: 0 0 0 2px var(--timeline-color);
+}
+
+.timeline-marker span.complete {
+  background: var(--el-color-success);
+  box-shadow: 0 0 0 2px var(--el-color-success);
+}
+
+.progress-timeline-item:not(:last-child) .timeline-marker::after {
+  position: absolute;
+  top: 17px;
+  bottom: -19px;
+  width: 2px;
+  background: var(--fs-color-border-strong, #c7d2e0);
+  content: '';
+}
+
+.timeline-content {
+  min-width: 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--timeline-color);
+  border-radius: 6px;
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--timeline-color) 12%, transparent),
+    transparent 72%
+  );
+}
+
+.timeline-content header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.timeline-content header strong {
+  color: var(--timeline-color);
+  font-size: 18px;
+}
+
+.timeline-content header span,
+.timeline-content time {
+  color: var(--fs-color-text-secondary, #64748b);
+  font-size: 13px;
+}
+
+.timeline-content p {
+  margin: 8px 0;
+  color: var(--fs-color-text, #1f2937);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.timeline-content footer {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+}
+
+@container (max-width: 700px) {
+  .task-overview-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .task-information {
+    border-top: 1px solid var(--fs-color-border, #dbe3ee);
+    border-left: 0;
+  }
+}
+
 .enum-select {
   width: 160px;
 }
@@ -1265,6 +1531,11 @@ watch(
 /* AI section */
 .ai-result {
   margin-top: 16px;
+}
+
+.ai-loading {
+  min-height: 240px;
+  padding: 12px 0;
 }
 
 .ai-hint {
@@ -1293,6 +1564,7 @@ watch(
 
   .content-panel {
     padding: 16px;
+    overflow-x: auto;
   }
 
   .task-meta {

@@ -21,4 +21,13 @@ public interface SummaryMapper extends BaseMapper<Summary> {
 				.orderByDesc(Summary::getCreatedAt, Summary::getId)
 				.last("LIMIT 10"));
 	}
+
+	default List<Summary> selectRecentByProjectIdsAndCreatorId(List<Long> projectIds, Long creatorId) {
+		return projectIds == null || projectIds.isEmpty() ? List.of()
+			: selectList(Wrappers.<Summary>lambdaQuery()
+				.in(Summary::getProjectId, projectIds)
+				.eq(Summary::getCreatedBy, creatorId)
+				.orderByDesc(Summary::getCreatedAt, Summary::getId)
+				.last("LIMIT 10"));
+	}
 }

@@ -27,9 +27,12 @@ import 'element-plus/es/components/skeleton/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 
+import MaterialIcon from '@/components/MaterialIcon.vue'
+import ProjectLink from '@/components/ProjectLink.vue'
 import { getApiErrorMessage } from '@/shared/api/errors'
 import { useAuthStore } from '@/stores/auth'
-import { getProject } from '@/views/projects/api'
+import { getProject, getProjectMembers } from '@/views/projects/api'
+import type { ProjectMember } from '@/views/projects/types'
 
 import {
   generateTaskPlan,
@@ -37,16 +40,31 @@ import {
 } from './api'
 import type { AiTaskPlanItem } from './types'
 
+const props = withDefaults(defineProps<{
+  projectId?: string
+  dialogMode?: boolean
+  autoGenerate?: boolean
+}>(), {
+  projectId: undefined,
+  dialogMode: false,
+  autoGenerate: false,
+})
+const emit = defineEmits<{
+  close: []
+  imported: []
+}>()
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 
-const projectId = computed(() => route.params.projectId as string)
+const projectId = computed(() => props.projectId ?? route.params.projectId as string)
 
 // --- Permission ---
 const isAdmin = computed(() => authStore.currentUser?.systemRole === 'ADMIN')
 const isProjectOwner = ref(false)
 const projectLoading = ref(false)
+const projectName = ref('')
+const memberOptions = ref<ProjectMember[]>([])
 
 // --- Step state ---
 type Step =
@@ -69,28 +87,37 @@ async function verifyProjectOwner(): Promise<void> {
 
   if (isAdmin.value) {
     step.value = 'forbidden'
-    errorMessage.value = '管理员不参与项目内容操作，不能使用 AI 任务计划。'
+    errorMessage.value = '管理员不参与项目内容操作，不能使用 AI 任务计划'
     projectLoading.value = false
     return
   }
 
   try {
     const project = await getProject(projectId.value)
+    projectName.value = project.name
     isProjectOwner.value =
       project.owner.id === authStore.currentUser?.id
 
     if (project.archivedAt) {
       step.value = 'forbidden'
-      errorMessage.value = '项目已归档，不能使用 AI 任务计划。'
+      errorMessage.value = '项目已归档，不能使用 AI 任务计划'
     } else if (!isProjectOwner.value) {
       step.value = 'forbidden'
-      errorMessage.value = '只有项目 owner 才能使用 AI 任务计划。'
+      errorMessage.value = '只有项目 owner 才能使用 AI 任务计划'
     } else {
-      step.value = 'input'
+      memberOptions.value = [...await getProjectMembers(projectId.value)]
+      goal.value = project.name
+      description.value = project.description ?? ''
+      targetEndDate.value = project.endDate ?? ''
+      if (props.autoGenerate) {
+        await handleGenerate()
+      } else {
+        step.value = 'input'
+      }
     }
   } catch {
     step.value = 'error'
-    errorMessage.value = '加载项目信息失败，请稍后重试。'
+    errorMessage.value = '加载项目信息失败，请稍后重试'
   } finally {
     projectLoading.value = false
   }
@@ -201,7 +228,12 @@ function handleRegenerate(): void {
   draftItems.value = []
   planOverview.value = ''
   generatedAt.value = ''
-  step.value = 'input'
+  errorMessage.value = ''
+  if (props.autoGenerate) {
+    void handleGenerate()
+  } else {
+    step.value = 'input'
+  }
 }
 
 // --- Validation ---
@@ -271,6 +303,7 @@ async function handleImport(): Promise<void> {
 
     draftItems.value = []
     step.value = 'imported'
+    emit('imported')
 
     ElMessage.success(`成功导入 ${result.importedCount} 个任务`)
   } catch (error) {
@@ -300,15 +333,24 @@ function handleBackToProject(): void {
     params: { projectId: projectId.value },
   })
 }
+
+function handleImportedAction(): void {
+  if (props.dialogMode) {
+    emit('close')
+  } else {
+    handleBackToTasks()
+  }
+}
 </script>
 
 <template>
   <section class="ai-plan-page">
-    <header class="page-header">
+    <header v-if="!dialogMode" class="page-header">
       <div>
         <h1>AI 任务计划</h1>
         <p>
-          为项目 {{ projectId }} 生成临时任务计划，人工审阅编辑后导入为正式任务。
+          为项目 <ProjectLink v-if="projectName" :project-id="projectId">{{ projectName }}</ProjectLink>
+          生成临时任务计划，导入前需人工审阅
         </p>
       </div>
 
@@ -316,6 +358,7 @@ function handleBackToProject(): void {
         data-testid="back-to-project"
         @click="handleBackToProject"
       >
+        <MaterialIcon name="arrow_back" />
         返回项目
       </el-button>
     </header>
@@ -325,7 +368,7 @@ function handleBackToProject(): void {
       v-if="step === 'loading'"
       class="content-panel"
     >
-      <el-skeleton animated :rows="6" />
+      <div aria-label="加载中" class="initial-loading-space" />
     </section>
 
     <!-- Step: Forbidden -->
@@ -340,11 +383,8 @@ function handleBackToProject(): void {
           type="warning"
           show-icon
         />
-        <router-link
-          :to="{ name: 'tasks' }"
-        >
-          返回任务列表
-        </router-link>
+        <el-button v-if="dialogMode" @click="emit('close')">关闭</el-button>
+        <router-link v-else :to="{ name: 'tasks' }">返回任务列表</router-link>
       </div>
     </section>
 
@@ -395,6 +435,7 @@ function handleBackToProject(): void {
             type="primary"
             @click="handleGenerate"
           >
+            <MaterialIcon name="auto_awesome" />
             生成初步计划
           </el-button>
         </div>
@@ -448,23 +489,32 @@ function handleBackToProject(): void {
               <el-option
                 v-for="item in draftItems"
                 :key="item.draftId"
-                :label="item.title || item.draftId"
+                :label="item.title || '未命名任务'"
                 :value="item.draftId"
               />
             </el-select>
           </template>
         </el-table-column>
 
-        <el-table-column label="负责人 ID" width="110">
+        <el-table-column label="负责人" width="150">
           <template #default="{ row }">
-            <el-input
+            <el-select
               v-model="row.assigneeId"
+              clearable
+              filterable
               placeholder="可选"
-            />
+            >
+              <el-option
+                v-for="member in memberOptions"
+                :key="member.user.id"
+                :label="member.user.displayName"
+                :value="member.user.id"
+              />
+            </el-select>
           </template>
         </el-table-column>
 
-        <el-table-column label="优先级" width="100">
+        <el-table-column label="优先级" width="140">
           <template #default="{ row }">
             <el-select
               v-model="row.priority"
@@ -477,7 +527,7 @@ function handleBackToProject(): void {
           </template>
         </el-table-column>
 
-        <el-table-column label="截止日期" width="160">
+        <el-table-column label="截止日期" width="180">
           <template #default="{ row }">
             <el-date-picker
               v-model="row.dueDate"
@@ -506,6 +556,7 @@ function handleBackToProject(): void {
               :disabled="$index === 0"
               @click="handleMoveUp($index)"
             >
+              <MaterialIcon name="arrow_upward" :size="18" />
               上移
             </el-button>
             <el-button
@@ -514,6 +565,7 @@ function handleBackToProject(): void {
               :disabled="$index === draftItems.length - 1"
               @click="handleMoveDown($index)"
             >
+              <MaterialIcon name="arrow_downward" :size="18" />
               下移
             </el-button>
           </template>
@@ -526,6 +578,7 @@ function handleBackToProject(): void {
               text
               @click="handleRemoveItem(row.draftId)"
             >
+              <MaterialIcon name="delete" :size="18" />
               删除
             </el-button>
           </template>
@@ -534,10 +587,12 @@ function handleBackToProject(): void {
 
       <div class="plan-footer">
         <el-button @click="handleAddItem">
+          <MaterialIcon name="add" />
           新增临时条目
         </el-button>
 
         <el-button @click="handleRegenerate">
+          <MaterialIcon name="refresh" />
           重新生成
         </el-button>
 
@@ -546,6 +601,7 @@ function handleBackToProject(): void {
           :loading="importing"
           @click="handleImport"
         >
+          <MaterialIcon name="publish" />
           确认并导入
         </el-button>
       </div>
@@ -563,9 +619,9 @@ function handleBackToProject(): void {
         <template #extra>
           <el-button
             type="primary"
-            @click="handleBackToTasks"
+            @click="handleImportedAction"
           >
-            返回任务列表
+            {{ dialogMode ? '关闭' : '返回任务列表' }}
           </el-button>
         </template>
       </el-result>
@@ -590,11 +646,8 @@ function handleBackToProject(): void {
           >
             重新开始
           </el-button>
-          <router-link
-            :to="{ name: 'tasks' }"
-          >
-            返回任务列表
-          </router-link>
+          <el-button v-if="dialogMode" @click="emit('close')">关闭</el-button>
+          <router-link v-else :to="{ name: 'tasks' }">返回任务列表</router-link>
         </div>
       </div>
     </section>
@@ -657,14 +710,18 @@ function handleBackToProject(): void {
   margin: 16px 0;
 }
 
-.plan-footer {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
+.plan-table :deep(.el-date-editor),
+.plan-table :deep(.el-input),
+.plan-table :deep(.el-select) {
+  width: 100%;
+  min-width: 0;
 }
 
-.enum-select {
-  width: 140px;
+.plan-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 /* Feedback */
@@ -685,7 +742,6 @@ function handleBackToProject(): void {
 @media (max-width: 720px) {
   .content-panel {
     padding: 16px;
-    overflow-x: auto;
   }
 
   .plan-form {

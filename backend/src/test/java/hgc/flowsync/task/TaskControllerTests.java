@@ -175,11 +175,26 @@ class TaskControllerTests {
 		for (String query : List.of(
 			"status=", "priority=", "page=", "size=", "sort=",
 			"status=%20", "priority=%20", "page=%20", "size=%20", "sort=%20",
-			"dueBefore=", "dueAfter=", "q=")) {
+			"dueBefore=", "dueAfter=", "incomplete=", "incomplete=yes", "q=")) {
 			taskRequest(get("/api/tasks?" + query), session, null)
 				.andExpect(status().isUnprocessableEntity())
 				.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
 		}
+	}
+
+	@Test
+	void incompleteFilterExcludesCompletedAndCancelledTasks() throws Exception {
+		User owner = insertUser(SystemRole.USER, true, "Owner");
+		Project project = insertProject(owner);
+		insertTask(project, owner, owner, null, "Active", TaskStatus.IN_PROGRESS);
+		insertTask(project, owner, owner, null, "Completed", TaskStatus.COMPLETED);
+		insertTask(project, owner, owner, null, "Cancelled", TaskStatus.CANCELLED);
+
+		taskRequest(get("/api/tasks?projectId=" + project.getId() + "&incomplete=true"),
+			login(owner), null)
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.totalElements").value(1))
+			.andExpect(jsonPath("$.items[0].title").value("Active"));
 	}
 
 	@Test

@@ -44,6 +44,7 @@ public class TaskController {
 		@RequestParam(required = false) @Pattern(regexp = "[1-9]\\d*") String parentId,
 		@RequestParam(required = false) String dueBefore,
 		@RequestParam(required = false) String dueAfter,
+		@RequestParam(required = false) String incomplete,
 		@RequestParam(required = false) String q,
 		@RequestParam(required = false) String page,
 		@RequestParam(required = false) String size,
@@ -57,10 +58,21 @@ public class TaskController {
 			parentId,
 			parseDate(dueBefore),
 			parseDate(dueAfter),
+			parseBoolean(incomplete),
 			optionalNonBlank(q),
 			parseInteger(page, 0, 0, Integer.MAX_VALUE),
 			parseInteger(size, 20, 1, 100),
 			parseSort(sort));
+	}
+
+	private static Boolean parseBoolean(String value) {
+		if (value == null) {
+			return null;
+		}
+		if (value.equals("true") || value.equals("false")) {
+			return Boolean.valueOf(value);
+		}
+		throw validationError();
 	}
 
 	private static <E extends Enum<E>> E parseEnum(String value, Class<E> type) {

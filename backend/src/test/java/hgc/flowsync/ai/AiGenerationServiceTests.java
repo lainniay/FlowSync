@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AiGenerationServiceTests {
@@ -92,6 +93,19 @@ class AiGenerationServiceTests {
 				.satisfies(exception -> assertThat(((BusinessException) exception).code())
 					.isEqualTo(ErrorCode.AI_PROVIDER_ERROR));
 		}
+	}
+
+	@Test
+	void retriesOneRejectedPlanAndReturnsTheNextValidResponse() {
+		when(aiClient.generatePlan(anyString(), anyString()))
+			.thenReturn("not json")
+			.thenReturn(plan("a", null, "2", "2026-07-20"));
+
+		AiTaskPlanResponse response = service.generatePlan(
+			authentication, 1L, new AiTaskPlanGenerateRequest("Goal", null, null));
+
+		assertThat(response.items()).hasSize(1);
+		verify(aiClient, org.mockito.Mockito.times(2)).generatePlan(anyString(), anyString());
 	}
 
 	private static String plan(

@@ -84,6 +84,7 @@ public class TaskService {
 		String requestedParentId,
 		LocalDate dueBefore,
 		LocalDate dueAfter,
+		Boolean incomplete,
 		String q,
 		int page,
 		int size,
@@ -104,6 +105,8 @@ public class TaskService {
 			.eq(parentId != null, Task::getParentId, parentId)
 			.le(dueBefore != null, Task::getDueDate, dueBefore)
 			.ge(dueAfter != null, Task::getDueDate, dueAfter)
+			.notIn(Boolean.TRUE.equals(incomplete), Task::getStatus,
+				TaskStatus.COMPLETED, TaskStatus.CANCELLED)
 			.like(q != null && !q.isEmpty(), Task::getTitle, q);
 
 		if (!projectAccessService.isAdmin(currentUser)) {

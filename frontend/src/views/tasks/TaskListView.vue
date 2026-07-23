@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import {
   computed,
+  nextTick,
   onMounted,
+  onUnmounted,
   reactive,
   ref,
+  watch,
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -19,7 +22,6 @@ import {
   ElOption,
   ElPagination,
   ElSelect,
-  ElSkeleton,
   ElTable,
   ElTableColumn,
   ElTag,
@@ -35,19 +37,31 @@ import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/skeleton/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
 import type { FormInstance, FormRules } from 'element-plus'
 
+import MaterialIcon from '@/components/MaterialIcon.vue'
+import ProjectLink from '@/components/ProjectLink.vue'
+import TaskLink from '@/components/TaskLink.vue'
+import UserLink from '@/components/UserLink.vue'
 import { getApiErrorMessage } from '@/shared/api/errors'
+import { fetchAllPages, PAGE_SIZE } from '@/shared/api/pagination'
 import type {
   Priority,
   TaskStatus,
 } from '@/shared/api/types'
 import { useAuthStore } from '@/stores/auth'
-import { getProject } from '@/views/projects/api'
+import {
+  getProject,
+  getProjectMembers,
+  getProjects,
+} from '@/views/projects/api'
+import type {
+  Project,
+  ProjectMember,
+} from '@/views/projects/types'
 
 import {
   createTask,
@@ -74,6 +88,14 @@ type TagType =
   | 'danger'
   | 'info'
 
+const props = withDefaults(defineProps<{
+  embedded?: boolean
+  project?: Project | null
+}>(), {
+  embedded: false,
+  project: null,
+})
+
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
@@ -81,7 +103,7 @@ const authStore = useAuthStore()
 const statusLabels: Record<TaskStatus, string> = {
   NOT_STARTED: '未开始',
   IN_PROGRESS: '进行中',
-  BLOCKED: '阻塞',
+  BLOCKED: '阻塞中',
   COMPLETED: '已完成',
   CANCELLED: '已取消',
 }
@@ -106,22 +128,27 @@ const priorityTagTypes: Record<Priority, TagType> = {
   HIGH: 'danger',
 }
 
-function getRouteProjectId(): string {
+function getContextProjectId(): string {
+  if (props.project) return props.project.id
+
   return typeof route?.query?.projectId === 'string'
     ? route.query.projectId
     : ''
 }
 
 function createInitialFilters(): TaskListFilters {
+  const routeStatus = typeof route?.query?.status === 'string'
+    && Object.prototype.hasOwnProperty.call(statusLabels, route.query.status)
+    ? route.query.status as TaskStatus
+    : ''
   return {
     q: '',
-    projectId: getRouteProjectId(),
-    assigneeId: '',
-    status: '',
+    projectId: getContextProjectId(),
+    status: routeStatus,
     priority: '',
-    parentId: '',
-    dueBefore: '',
-    dueAfter: '',
+    dueBefore: typeof route?.query?.dueBefore === 'string' ? route.query.dueBefore : '',
+    dueAfter: typeof route?.query?.dueAfter === 'string' ? route.query.dueAfter : '',
+    incomplete: route?.query?.incomplete === 'true',
   }
 }
 
@@ -134,26 +161,36 @@ const appliedFilters = ref<TaskListFilters>(
 )
 
 const tasks = ref<Task[]>([])
+const summaryTasks = ref<Task[]>([])
+const taskListRef = ref<HTMLElement | null>(null)
+const projectOptions = ref<Project[]>([])
+const writableProjectOptions = computed(() => projectOptions.value
+  .filter((project) => project.archivedAt === null))
+const projectNames = computed(() => new Map(
+  projectOptions.value.map((project) => [project.id, project.name]),
+))
 const page = ref(0)
-const size = ref(20)
 const totalElements = ref(0)
 const totalPages = ref(0)
 const loading = ref(false)
 const loaded = ref(false)
 const errorMessage = ref('')
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let taskRequestId = 0
+
+const isAdmin = computed(() => authStore.currentUser?.systemRole === 'ADMIN')
 
 const hasActiveFilters = computed(() => {
   const current = appliedFilters.value
 
   return (
     current.q !== ''
-    || current.projectId !== ''
-    || current.assigneeId !== ''
+    || (!props.embedded && current.projectId !== '')
     || current.status !== ''
     || current.priority !== ''
-    || current.parentId !== ''
     || current.dueBefore !== ''
     || current.dueAfter !== ''
+    || current.incomplete
   )
 })
 
@@ -175,57 +212,148 @@ const pageState = computed<PageState>(() => {
     : 'empty'
 })
 
+const taskSummaryCards = computed(() => [
+  {
+    key: 'NOT_STARTED',
+    label: '未开始',
+    icon: 'checklist',
+    count: summaryTasks.value.filter((task) => task.status === 'NOT_STARTED').length,
+  },
+  {
+    key: 'IN_PROGRESS',
+    label: '进行中',
+    icon: 'schedule',
+    count: summaryTasks.value.filter((task) => task.status === 'IN_PROGRESS').length,
+  },
+  {
+    key: 'COMPLETED',
+    label: '已完成',
+    icon: 'task_alt',
+    count: summaryTasks.value.filter((task) => task.status === 'COMPLETED').length,
+  },
+  {
+    key: 'BLOCKED',
+    label: '阻塞中',
+    icon: 'warning',
+    count: summaryTasks.value.filter((task) => task.status === 'BLOCKED').length,
+  },
+] as const)
+
+const dueSoonTasks = computed(() => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const deadline = new Date(today)
+  deadline.setDate(deadline.getDate() + 7)
+
+  return summaryTasks.value.filter((task) => {
+    if (!task.dueDate || task.status === 'COMPLETED' || task.status === 'CANCELLED') return false
+    const dueDate = new Date(`${task.dueDate}T00:00:00`)
+    return dueDate > today && dueDate <= deadline
+  })
+})
+
+const dueSoonTitle = computed(() => {
+  const titles = dueSoonTasks.value.slice(0, 3).map((task) => task.title)
+  const suffix = dueSoonTasks.value.length > 3 ? ' 等' : ''
+  return `7 天内即将到期：${titles.join('、')}${suffix}（共 ${dueSoonTasks.value.length} 个）`
+})
+
 function buildQuery(): TaskListQuery {
   const current = appliedFilters.value
 
   return {
     q: current.q || undefined,
     projectId: current.projectId || undefined,
-    assigneeId: current.assigneeId || undefined,
+    assigneeId: props.embedded ? undefined : authStore.currentUser?.id,
     status: current.status || undefined,
     priority: current.priority || undefined,
-    parentId: current.parentId || undefined,
     dueBefore: current.dueBefore || undefined,
     dueAfter: current.dueAfter || undefined,
+    incomplete: current.incomplete || undefined,
     page: page.value,
-    size: size.value,
+    size: PAGE_SIZE,
     sort: 'createdAt,desc',
   }
 }
 
 async function loadTasks(): Promise<void> {
+  const requestId = ++taskRequestId
   loading.value = true
   errorMessage.value = ''
 
   try {
     const result = await getTasks(buildQuery())
+    if (requestId !== taskRequestId) return
 
     tasks.value = [...result.items]
     page.value = result.page
-    size.value = result.size
     totalElements.value = result.totalElements
     totalPages.value = result.totalPages
   } catch (error) {
+    if (requestId !== taskRequestId) return
     errorMessage.value = getApiErrorMessage(
       error,
       '任务列表加载失败，请稍后重试',
     )
   } finally {
-    loading.value = false
-    loaded.value = true
+    if (requestId === taskRequestId) {
+      loading.value = false
+      loaded.value = true
+    }
   }
 }
 
+async function loadTaskSummary(): Promise<void> {
+  if (props.embedded || isAdmin.value || !authStore.currentUser?.id) {
+    summaryTasks.value = []
+    return
+  }
+
+  try {
+    summaryTasks.value = [...await fetchAllPages(getTasks, {
+      assigneeId: authStore.currentUser.id,
+      sort: 'dueDate,asc',
+    })]
+  } catch {
+    summaryTasks.value = []
+  }
+}
+
+function isSummaryCardActive(status: TaskStatus): boolean {
+  return appliedFilters.value.status === status
+}
+
+async function applySummaryFilter(status: TaskStatus): Promise<void> {
+  clearTimeout(searchTimer)
+  searchTimer = undefined
+  const initial: TaskListFilters = {
+    q: '',
+    projectId: getContextProjectId(),
+    status,
+    priority: '',
+    dueBefore: '',
+    dueAfter: '',
+    incomplete: false,
+  }
+  Object.assign(filters, initial)
+  appliedFilters.value = initial
+  page.value = 0
+  await Promise.all([loadTasks(), checkCreatePermission('')])
+  await nextTick()
+  taskListRef.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+}
+
 async function handleSearch(): Promise<void> {
+  clearTimeout(searchTimer)
+  searchTimer = undefined
   appliedFilters.value = {
     q: filters.q.trim(),
     projectId: filters.projectId.trim(),
-    assigneeId: filters.assigneeId.trim(),
     status: filters.status,
     priority: filters.priority,
-    parentId: filters.parentId.trim(),
     dueBefore: filters.dueBefore,
     dueAfter: filters.dueAfter,
+    incomplete: filters.incomplete,
   }
 
   page.value = 0
@@ -235,8 +363,23 @@ async function handleSearch(): Promise<void> {
   ])
 }
 
+function scheduleSearch(): void {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => void handleSearch(), 300)
+}
+
 async function handleReset(): Promise<void> {
-  const initial = createInitialFilters()
+  clearTimeout(searchTimer)
+  searchTimer = undefined
+  const initial: TaskListFilters = {
+    q: '',
+    projectId: getContextProjectId(),
+    status: '',
+    priority: '',
+    dueBefore: '',
+    dueAfter: '',
+    incomplete: false,
+  }
 
   Object.assign(filters, initial)
   appliedFilters.value = initial
@@ -255,19 +398,14 @@ async function handlePageChange(
   await loadTasks()
 }
 
-async function handleSizeChange(
-  nextSize: number,
-): Promise<void> {
-  size.value = nextSize
-  page.value = 0
-  await loadTasks()
-}
-
 // --- Create dialog ---
 
 const createDialogVisible = ref(false)
 const createFormRef = ref<FormInstance>()
 const createSubmitting = ref(false)
+const createRelationsLoading = ref(false)
+const createMemberOptions = ref<ProjectMember[]>([])
+const createParentOptions = ref<Task[]>([])
 
 const defaultCreateForm: {
   projectId: string
@@ -293,7 +431,7 @@ const createForm = reactive({ ...defaultCreateForm })
 
 const createRules: FormRules = {
   projectId: [
-    { required: true, message: '请输入项目 ID', trigger: 'blur' },
+    { required: true, message: '请选择项目', trigger: 'change' },
   ],
   title: [
     { required: true, message: '请输入任务标题', trigger: 'blur' },
@@ -314,6 +452,11 @@ async function checkCreatePermission(projectId: string): Promise<void> {
     createProjectArchived.value = false
     return
   }
+  if (props.project?.id === projectId) {
+    createProjectOwnerId.value = props.project.owner.id
+    createProjectArchived.value = Boolean(props.project.archivedAt)
+    return
+  }
   try {
     const project = await getProject(projectId)
     createProjectOwnerId.value = project.owner.id
@@ -332,13 +475,56 @@ const canCreateTask = computed(() => {
   return createProjectOwnerId.value === authStore.currentUser?.id
 })
 
-function openCreateDialog(): void {
+async function loadProjectOptions(): Promise<void> {
+  if (props.project) {
+    projectOptions.value = [props.project]
+    return
+  }
+
+  try {
+    const [active, archived] = await Promise.all([
+      fetchAllPages(getProjects, { archived: false, sort: 'name,asc' }),
+      fetchAllPages(getProjects, { archived: true, sort: 'name,asc' }),
+    ])
+    projectOptions.value = [...active, ...archived]
+  } catch (error) {
+    projectOptions.value = []
+    ElMessage.error(getApiErrorMessage(error, '项目选项加载失败，请稍后重试'))
+  }
+}
+
+async function loadCreateRelations(projectId: string): Promise<void> {
+  createMemberOptions.value = []
+  createParentOptions.value = []
+  createForm.parentId = ''
+  createForm.assigneeId = ''
+  if (!projectId) return
+
+  createRelationsLoading.value = true
+  try {
+    const [members, parents] = await Promise.all([
+      getProjectMembers(projectId),
+      fetchAllPages(getTasks, { projectId, sort: 'title,asc' }),
+    ])
+    createMemberOptions.value = [...members]
+    createParentOptions.value = [...parents]
+  } catch (error) {
+    createMemberOptions.value = []
+    createParentOptions.value = []
+    ElMessage.error(getApiErrorMessage(error, '任务关联选项加载失败，请稍后重试'))
+  } finally {
+    createRelationsLoading.value = false
+  }
+}
+
+async function openCreateDialog(): Promise<void> {
   const prefilled = {
     ...defaultCreateForm,
     projectId: appliedFilters.value.projectId || '',
   }
   Object.assign(createForm, prefilled)
   createDialogVisible.value = true
+  await loadCreateRelations(createForm.projectId)
 }
 
 async function handleCreate(): Promise<void> {
@@ -371,7 +557,7 @@ async function handleCreate(): Promise<void> {
     await createTask(body)
     ElMessage.success('任务创建成功')
     createDialogVisible.value = false
-    await loadTasks()
+    await Promise.all([loadTasks(), loadTaskSummary()])
   } catch (error) {
     ElMessage.error(
       getApiErrorMessage(error, '创建任务失败，请稍后重试'),
@@ -381,24 +567,8 @@ async function handleCreate(): Promise<void> {
   }
 }
 
-function getTaskDetailLocation(taskId: string) {
-  const routeProjectId = getRouteProjectId()
-
-  return {
-    name: 'task-detail',
-    params: { taskId },
-    ...(routeProjectId
-      ? { query: { projectId: routeProjectId } }
-      : {}),
-  }
-}
-
-function goToTask(taskId: string): void {
-  void router.push(getTaskDetailLocation(taskId))
-}
-
 function goToProject(): void {
-  const routeProjectId = getRouteProjectId()
+  const routeProjectId = getContextProjectId()
   if (!routeProjectId) return
 
   void router.push({
@@ -407,41 +577,54 @@ function goToProject(): void {
   })
 }
 
-function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
 onMounted(async () => {
   const pid = appliedFilters.value.projectId
   await Promise.all([
     loadTasks(),
+    loadProjectOptions(),
+    loadTaskSummary(),
     pid ? checkCreatePermission(pid) : Promise.resolve(),
   ])
 })
+
+onUnmounted(() => clearTimeout(searchTimer))
+
+watch(() => props.project?.id, (projectId) => {
+  if (!props.embedded || !projectId) return
+
+  clearTimeout(searchTimer)
+  searchTimer = undefined
+
+  const initial = createInitialFilters()
+  Object.assign(filters, initial)
+  appliedFilters.value = initial
+  page.value = 0
+  void Promise.all([
+    loadTasks(),
+    loadProjectOptions(),
+    checkCreatePermission(projectId),
+  ])
+})
+
+function projectName(projectId: string): string {
+  return projectNames.value.get(projectId) ?? '项目不可用'
+}
+
+defineExpose({ reload: loadTasks })
 </script>
 
 <template>
-  <section class="task-page">
+  <section class="task-page" :class="{ 'task-page--embedded': embedded }">
     <header class="page-header">
-      <div>
-        <h1>任务</h1>
-        <p>
-          ADMIN 查看全部任务，USER 只查看自己参与项目的任务。
-        </p>
-      </div>
+      <h1>{{ embedded ? '任务委派' : '我的任务' }}</h1>
 
       <div class="header-actions">
         <el-button
-          v-if="getRouteProjectId()"
+          v-if="!embedded && getContextProjectId()"
           data-testid="back-to-project"
           @click="goToProject"
         >
+          <MaterialIcon name="arrow_back" />
           返回项目
         </el-button>
 
@@ -450,126 +633,140 @@ onMounted(async () => {
           type="primary"
           @click="openCreateDialog"
         >
+          <MaterialIcon name="add_task" />
           创建任务
         </el-button>
 
-        <el-button
-          :loading="loading"
-          @click="loadTasks"
-        >
-          刷新
-        </el-button>
       </div>
     </header>
 
+    <template v-if="!embedded && !isAdmin">
+      <div
+        v-if="dueSoonTasks.length > 0"
+        class="deadline-alert"
+        data-testid="task-deadline-alert"
+        role="alert"
+      >
+        <MaterialIcon name="warning" :size="24" />
+        <strong>{{ dueSoonTitle }}</strong>
+      </div>
+
+      <section class="task-summary-grid" aria-label="我的任务汇总">
+        <button
+          v-for="card in taskSummaryCards"
+          :key="card.key"
+          class="task-summary-card"
+          :class="{ active: isSummaryCardActive(card.key) }"
+          :data-testid="`task-summary-${card.key}`"
+          type="button"
+          @click="applySummaryFilter(card.key)"
+        >
+          <span class="summary-icon">
+            <MaterialIcon :name="card.icon" :size="24" />
+          </span>
+          <span>
+            <strong>{{ card.count }}</strong>
+            <small>{{ card.label }}</small>
+          </span>
+        </button>
+      </section>
+    </template>
+
     <section class="filter-panel">
       <el-form
-        :inline="true"
+        class="filter-layout"
+        label-position="top"
         :model="filters"
         @submit.prevent="handleSearch"
       >
-        <el-form-item label="标题搜索">
+        <div class="filter-fields">
+          <el-form-item label="标题搜索">
           <el-input
             v-model="filters.q"
             clearable
             placeholder="按标题搜索"
+            @clear="handleSearch"
+            @input="scheduleSearch"
           />
-        </el-form-item>
+          </el-form-item>
 
-        <el-form-item label="项目 ID">
-          <el-input
+          <el-form-item v-if="!embedded" label="项目">
+          <el-select
             v-model="filters.projectId"
             clearable
-            placeholder="可选"
-          />
-        </el-form-item>
+            filterable
+            placeholder="全部项目"
+            @change="handleSearch"
+          >
+            <el-option
+              v-for="project in projectOptions"
+              :key="project.id"
+              :label="project.name"
+              :value="project.id"
+            />
+          </el-select>
+          </el-form-item>
 
-        <el-form-item label="负责人 ID">
-          <el-input
-            v-model="filters.assigneeId"
-            clearable
-            placeholder="可选"
-          />
-        </el-form-item>
-
-        <el-form-item label="状态">
+          <el-form-item label="状态">
           <el-select
             v-model="filters.status"
             class="enum-select"
             placeholder="全部状态"
+            @change="handleSearch"
           >
             <el-option label="全部状态" value="" />
             <el-option label="未开始" value="NOT_STARTED" />
             <el-option label="进行中" value="IN_PROGRESS" />
-            <el-option label="阻塞" value="BLOCKED" />
+            <el-option label="阻塞中" value="BLOCKED" />
             <el-option label="已完成" value="COMPLETED" />
             <el-option label="已取消" value="CANCELLED" />
           </el-select>
-        </el-form-item>
+          </el-form-item>
 
-        <el-form-item label="优先级">
+          <el-form-item label="优先级">
           <el-select
             v-model="filters.priority"
             class="enum-select"
             placeholder="全部优先级"
+            @change="handleSearch"
           >
             <el-option label="全部优先级" value="" />
             <el-option label="低" value="LOW" />
             <el-option label="中" value="MEDIUM" />
             <el-option label="高" value="HIGH" />
           </el-select>
-        </el-form-item>
+          </el-form-item>
 
-        <el-form-item label="父任务 ID">
-          <el-input
-            v-model="filters.parentId"
-            clearable
-            placeholder="可选"
-          />
-        </el-form-item>
+        </div>
 
-        <el-form-item label="截止日期">
-          <el-date-picker
-            v-model="filters.dueBefore"
-            placeholder="不晚于"
-            type="date"
-            value-format="YYYY-MM-DD"
-          />
-        </el-form-item>
-
-        <el-form-item label="起始日期">
-          <el-date-picker
-            v-model="filters.dueAfter"
-            placeholder="不早于"
-            type="date"
-            value-format="YYYY-MM-DD"
-          />
-        </el-form-item>
-
-        <el-form-item>
-          <el-button
-            native-type="submit"
-            type="primary"
-          >
-            查询
-          </el-button>
-
+        <div class="filter-actions" role="group" aria-label="筛选操作">
           <el-button @click="handleReset">
+            <MaterialIcon name="filter_list_off" />
             重置
           </el-button>
-        </el-form-item>
+        </div>
       </el-form>
+      <div
+        v-if="appliedFilters.dueBefore || appliedFilters.dueAfter"
+        class="due-filter-hint"
+      >
+        <MaterialIcon name="schedule" :size="18" />
+        <span v-if="appliedFilters.incomplete">仅未完成 ·</span>
+        截止日期：{{ appliedFilters.dueAfter || '最早' }} 至
+        {{ appliedFilters.dueBefore || '最晚' }}
+      </div>
     </section>
 
     <section
+      ref="taskListRef"
       class="content-panel"
       data-testid="task-content"
       :data-state="pageState"
     >
-      <el-skeleton
+      <div
         v-if="pageState === 'initialLoading'"
-        animated
-        :rows="6"
+        aria-label="加载中"
+        class="initial-loading-space"
       />
 
       <div
@@ -592,15 +789,6 @@ onMounted(async () => {
       </div>
 
       <template v-else>
-        <el-alert
-          v-if="pageState === 'refreshing'"
-          class="refresh-alert"
-          :closable="false"
-          title="正在刷新任务数据"
-          type="info"
-          show-icon
-        />
-
         <el-table
           :data="tasks"
           row-key="id"
@@ -610,27 +798,40 @@ onMounted(async () => {
             min-width="160"
           >
             <template #default="{ row }">
-              <router-link
-                :to="getTaskDetailLocation((row as Task).id)"
-                class="task-link"
+              <TaskLink
+                :task-id="(row as Task).id"
+                :project-id="getContextProjectId() || undefined"
               >
                 {{ row.title }}
-              </router-link>
+              </TaskLink>
             </template>
           </el-table-column>
 
           <el-table-column
+            v-if="!embedded"
             label="项目"
-            prop="projectId"
-            width="100"
-          />
+            min-width="140"
+          >
+            <template #default="{ row }">
+              <ProjectLink
+                v-if="projectNames.has((row as Task).projectId)"
+                :project-id="(row as Task).projectId"
+              >
+                {{ projectName((row as Task).projectId) }}
+              </ProjectLink>
+              <span v-else>项目不可用</span>
+            </template>
+          </el-table-column>
 
           <el-table-column
             label="负责人"
             min-width="100"
           >
             <template #default="{ row }">
-              {{ row.assignee?.displayName ?? '--' }}
+              <UserLink v-if="row.assignee" :user-id="row.assignee.id">
+                {{ row.assignee.displayName }}
+              </UserLink>
+              <span v-else>--</span>
             </template>
           </el-table-column>
 
@@ -674,37 +875,14 @@ onMounted(async () => {
             </template>
           </el-table-column>
 
-          <el-table-column
-            label="更新时间"
-            min-width="160"
-          >
-            <template #default="{ row }">
-              <span class="muted">{{ formatDateTime(row.updatedAt) }}</span>
-            </template>
-          </el-table-column>
-
-          <el-table-column
-            fixed="right"
-            label="操作"
-            width="100"
-          >
-            <template #default="{ row }">
-              <el-button
-                link
-                type="primary"
-                @click="goToTask((row as Task).id)"
-              >
-                查看
-              </el-button>
-            </template>
-          </el-table-column>
-
           <template #empty>
             <el-empty
               :description="
                 hasActiveFilters
                   ? '没有符合条件的任务'
-                  : '当前没有可见任务'
+                  : embedded
+                    ? '当前项目没有任务'
+                    : '当前没有负责的任务'
               "
             >
               <el-button
@@ -721,12 +899,10 @@ onMounted(async () => {
           v-if="totalElements > 0"
           class="task-pagination"
           :current-page="page + 1"
-          layout="total, sizes, prev, pager, next"
-          :page-size="size"
-          :page-sizes="[10, 20, 50, 100]"
+          layout="total, prev, pager, next"
+          :page-size="PAGE_SIZE"
           :total="totalElements"
           @current-change="handlePageChange"
-          @size-change="handleSizeChange"
         />
       </template>
     </section>
@@ -744,18 +920,37 @@ onMounted(async () => {
         :rules="createRules"
         label-position="top"
       >
-        <el-form-item label="项目 ID" prop="projectId">
-          <el-input
+        <el-form-item label="项目" prop="projectId">
+          <el-select
             v-model="createForm.projectId"
-            placeholder="输入项目 ID"
-          />
+            filterable
+            placeholder="选择项目"
+            @change="loadCreateRelations"
+          >
+            <el-option
+              v-for="project in writableProjectOptions"
+              :key="project.id"
+              :label="project.name"
+              :value="project.id"
+            />
+          </el-select>
         </el-form-item>
 
-        <el-form-item label="父任务 ID">
-          <el-input
+        <el-form-item label="父任务">
+          <el-select
             v-model="createForm.parentId"
-            placeholder="可选，同一项目内的父任务 ID"
-          />
+            clearable
+            filterable
+            :loading="createRelationsLoading"
+            placeholder="可选"
+          >
+            <el-option
+              v-for="parent in createParentOptions"
+              :key="parent.id"
+              :label="parent.title"
+              :value="parent.id"
+            />
+          </el-select>
         </el-form-item>
 
         <el-form-item label="标题" prop="title">
@@ -776,11 +971,21 @@ onMounted(async () => {
           />
         </el-form-item>
 
-        <el-form-item label="负责人 ID">
-          <el-input
+        <el-form-item label="负责人">
+          <el-select
             v-model="createForm.assigneeId"
-            placeholder="可选，必须是项目成员"
-          />
+            clearable
+            filterable
+            :loading="createRelationsLoading"
+            placeholder="可选"
+          >
+            <el-option
+              v-for="member in createMemberOptions"
+              :key="member.user.id"
+              :label="member.user.displayName"
+              :value="member.user.id"
+            />
+          </el-select>
         </el-form-item>
 
         <el-form-item label="状态" prop="status">
@@ -790,7 +995,7 @@ onMounted(async () => {
           >
             <el-option label="未开始" value="NOT_STARTED" />
             <el-option label="进行中" value="IN_PROGRESS" />
-            <el-option label="阻塞" value="BLOCKED" />
+            <el-option label="阻塞中" value="BLOCKED" />
             <el-option label="已完成" value="COMPLETED" />
             <el-option label="已取消" value="CANCELLED" />
           </el-select>
@@ -837,7 +1042,9 @@ onMounted(async () => {
 <style scoped>
 .task-page {
   display: grid;
+  min-width: 0;
   gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .page-header {
@@ -860,7 +1067,74 @@ onMounted(async () => {
 
 .header-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.deadline-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.task-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.task-summary-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--fs-color-border, #dbe3ee);
+  border-radius: 8px;
+  background: var(--fs-color-surface, #fff);
+  color: var(--fs-color-text, #1f2937);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-summary-card:hover,
+.task-summary-card.active {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 4px 14px rgb(37 99 235 / 12%);
+}
+
+.task-summary-card.active {
+  background: var(--el-color-primary-light-9);
+}
+
+.task-summary-card .summary-icon {
+  display: inline-flex;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+}
+
+.task-summary-card strong,
+.task-summary-card small {
+  display: block;
+}
+
+.task-summary-card strong {
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.task-summary-card small {
+  margin-top: 4px;
+  color: var(--fs-color-text-secondary, #64748b);
+  font-size: 13px;
 }
 
 .filter-panel,
@@ -871,16 +1145,26 @@ onMounted(async () => {
 }
 
 .filter-panel {
-  padding: 16px 16px 0;
+  padding: 16px;
+}
+
+.due-filter-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--fs-color-text-secondary, #64748b);
+  font-size: 13px;
 }
 
 .content-panel {
   min-height: 320px;
   padding: 20px;
+  overflow-x: auto;
 }
 
 .enum-select {
-  width: 130px;
+  width: 100%;
 }
 
 .feedback-state {
@@ -889,19 +1173,6 @@ onMounted(async () => {
   align-content: center;
   gap: 16px;
   justify-items: center;
-}
-
-.refresh-alert {
-  margin-bottom: 12px;
-}
-
-.task-link {
-  color: var(--fs-color-primary, #2563eb);
-  text-decoration: none;
-}
-
-.task-link:hover {
-  text-decoration: underline;
 }
 
 .task-pagination {

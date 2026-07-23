@@ -8,7 +8,6 @@ import {
   ElFormItem,
   ElInput,
   ElMessage,
-  ElSkeleton,
   ElTag,
 } from 'element-plus'
 import type {
@@ -21,7 +20,6 @@ import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
 import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/message/style/css'
-import 'element-plus/es/components/skeleton/style/css'
 import 'element-plus/es/components/tag/style/css'
 
 import {
@@ -278,9 +276,7 @@ watch(
     <header class="page-header">
       <div>
         <h1>个人中心</h1>
-        <p>
-          查看账号信息，修改个人资料和登录密码。
-        </p>
+        <p>管理个人资料、联系方式和账号安全。</p>
       </div>
     </header>
 
@@ -290,7 +286,7 @@ watch(
       :data-state="pageState"
     >
       <template v-if="pageState === 'initialLoading'">
-        <el-skeleton animated :rows="8" />
+        <div aria-label="加载中" class="initial-loading-space" />
       </template>
 
       <template v-else-if="pageState === 'error'">
@@ -313,6 +309,10 @@ watch(
 
           <dl class="readonly-grid">
             <div>
+              <dt>用户 ID</dt>
+              <dd>{{ authStore.currentUser.id }}</dd>
+            </div>
+            <div>
               <dt>用户名</dt>
               <dd>{{ authStore.currentUser.username }}</dd>
             </div>
@@ -327,26 +327,34 @@ watch(
                   "
                   effect="plain"
                 >
-                  {{ authStore.currentUser.systemRole }}
+                  {{ authStore.currentUser.systemRole === 'ADMIN' ? '管理员' : '普通用户' }}
                 </el-tag>
               </dd>
             </div>
             <div>
-              <dt>启用状态</dt>
+              <dt>账号状态</dt>
               <dd>
                 <el-tag
                   :type="authStore.currentUser.active ? 'success' : 'info'"
                   effect="plain"
                 >
-                  {{ authStore.currentUser.active ? '启用' : '停用' }}
+                  {{ authStore.currentUser.active ? '已启用' : '已停用' }}
                 </el-tag>
               </dd>
+            </div>
+            <div>
+              <dt>手机号</dt>
+              <dd>{{ authStore.currentUser.phone ?? '未填写' }}</dd>
+            </div>
+            <div>
+              <dt>邮箱</dt>
+              <dd>{{ authStore.currentUser.email ?? '未填写' }}</dd>
             </div>
           </dl>
         </section>
 
         <section class="profile-section">
-          <h2>修改资料</h2>
+          <h2>个人资料</h2>
 
           <el-form
             ref="profileFormRef"
@@ -385,15 +393,15 @@ watch(
               native-type="submit"
               type="primary"
             >
-              保存资料
+              保存修改
             </el-button>
           </el-form>
         </section>
 
         <section class="profile-section">
-          <h2>修改密码</h2>
+          <h2>安全设置</h2>
           <p class="section-note">
-            修改成功后当前 Session 会失效，需要重新登录。
+            修改成功后当前 Session 会失效，需要重新登录
           </p>
 
           <el-form
@@ -451,7 +459,9 @@ watch(
 <style scoped>
 .profile-page {
   display: grid;
+  min-width: 0;
   gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .page-header {
@@ -474,18 +484,27 @@ watch(
 
 .content-panel {
   display: grid;
-  gap: 24px;
+  width: 100%;
+  max-width: 860px;
+  gap: 36px;
   min-height: 320px;
-  padding: 20px;
+  padding: 24px;
   border: 1px solid var(--fs-color-border, #dbe3ee);
   border-radius: 8px;
   background: var(--fs-color-surface, #fff);
+  box-shadow: none;
 }
 
 .profile-section h2 {
-  margin: 0 0 12px;
+  margin: 0 0 24px;
   color: var(--fs-color-text, #1f2937);
   font-size: 18px;
+}
+
+.profile-section {
+  width: 100%;
+  padding: 0;
+  border: 0;
 }
 
 .section-note {
@@ -496,8 +515,9 @@ watch(
 
 .readonly-grid {
   display: grid;
-  gap: 12px;
+  gap: 24px 32px;
   margin: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .readonly-grid div {
@@ -517,7 +537,8 @@ watch(
 }
 
 .profile-form {
-  max-width: 420px;
+  width: 100%;
+  max-width: none;
 }
 
 .feedback-state {
@@ -530,7 +551,16 @@ watch(
 
 @media (max-width: 720px) {
   .content-panel {
+    gap: 28px;
     padding: 16px;
+  }
+
+  .profile-section {
+    padding: 0;
+  }
+
+  .readonly-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

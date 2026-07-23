@@ -1,5 +1,7 @@
 package hgc.flowsync.user;
 
+import java.util.List;
+
 import hgc.flowsync.common.api.PageResponse;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
@@ -45,10 +47,22 @@ public class UserController {
 		return userService.findAll(q, systemRole, Boolean.parseBoolean(active), page, size, sort);
 	}
 
+	@GetMapping("/api/user-options")
+	@PreAuthorize("isAuthenticated()")
+	List<UserOptionResponse> userOptions(@RequestParam(required = false) @Size(max = 50) String q) {
+		return userService.findOptions(q);
+	}
+
 	@GetMapping("/api/users/{userId}")
 	@PreAuthorize("hasRole('ADMIN')")
 	UserResponse user(@PathVariable Long userId) {
 		return userService.findById(userId);
+	}
+
+	@GetMapping("/api/users/{userId}/profile")
+	@PreAuthorize("isAuthenticated()")
+	PublicUserProfileResponse publicProfile(@PathVariable Long userId) {
+		return userService.findPublicProfile(userId);
 	}
 
 	@PostMapping("/api/users")

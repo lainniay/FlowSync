@@ -70,18 +70,41 @@ public class ProjectService {
 		String q,
 		ProjectStatus status,
 		String requestedOwnerId,
+		String requestedUserId,
+		ProjectParticipationRole myRole,
 		boolean archived,
 		int page,
 		int size,
 		String sort) {
 		User currentUser = currentUserService.require(authentication);
 		Long ownerId = requestedOwnerId == null ? null : parseId(requestedOwnerId);
+		Long userId = requestedUserId == null ? null : parseId(requestedUserId);
+		if (myRole != null && projectAccessService.isAdmin(currentUser)) {
+			return PageResponse.of(List.of(), page, size, 0);
+		}
 		LambdaQueryWrapper<Project> query = Wrappers.<Project>lambdaQuery()
 			.eq(status != null, Project::getStatus, status)
 			.eq(ownerId != null, Project::getOwnerId, ownerId)
 			.like(q != null && !q.isEmpty(), Project::getName, q)
 			.isNotNull(archived, Project::getArchivedAt)
 			.isNull(!archived, Project::getArchivedAt);
+		if (myRole == ProjectParticipationRole.OWNER) {
+			query.eq(Project::getOwnerId, currentUser.getId());
+		} else if (myRole == ProjectParticipationRole.MEMBER) {
+			query.ne(Project::getOwnerId, currentUser.getId());
+		}
+		if (userId != null) {
+			List<Long> userProjectIds = projectMemberMapper.selectList(
+				Wrappers.<ProjectMember>lambdaQuery()
+					.select(ProjectMember::getProjectId)
+					.eq(ProjectMember::getUserId, userId)).stream()
+				.map(ProjectMember::getProjectId)
+				.toList();
+			if (userProjectIds.isEmpty()) {
+				return PageResponse.of(List.of(), page, size, 0);
+			}
+			query.in(Project::getId, userProjectIds);
+		}
 		if (!projectAccessService.isAdmin(currentUser)) {
 			List<Long> projectIds = projectMemberMapper.selectList(Wrappers.<ProjectMember>lambdaQuery()
 				.select(ProjectMember::getProjectId)

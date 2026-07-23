@@ -84,10 +84,6 @@ async function handleLogin(): Promise<void> {
     <el-card class="login-card" shadow="never">
       <p class="eyebrow">小组任务协同管理系统</p>
       <h1>FlowSync</h1>
-      <p class="description">
-        登录后进入项目与任务协作空间。
-      </p>
-
       <el-form
         ref="loginFormRef"
         :model="loginForm"

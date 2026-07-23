@@ -58,12 +58,24 @@ describe('InvitationListView', () => {
     await flushPromises()
 
     expect(getReceivedInvitations).toHaveBeenCalledWith({
-      status: undefined,
+      status: 'PENDING',
     })
     expect(
       wrapper.get('[data-testid="invitation-content"]')
         .attributes('data-state'),
     ).toBe('success')
+
+    const vm = wrapper.vm as unknown as {
+      statusFilter: '' | 'PENDING'
+      handleSearch: () => Promise<void>
+    }
+    vm.statusFilter = ''
+    await vm.handleSearch()
+
+    expect(getReceivedInvitations).toHaveBeenLastCalledWith({
+      status: undefined,
+    })
+    expect(wrapper.text()).not.toContain('查询')
   })
 
   it('shows empty after a successful empty response', async () => {

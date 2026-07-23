@@ -19,6 +19,12 @@ env = { SPRING_PROFILES_ACTIVE = "dev" }
 run = "./mvnw spring-boot:run"
 run_windows = "mvnw.cmd spring-boot:run"
 
+[tasks."seed:backend"]
+dir = "backend"
+env = { SPRING_PROFILES_ACTIVE = "dev,dev-seed", SPRING_DEVTOOLS_RESTART_ENABLED = "false", FLOWSYNC_DEV_SEED_ENABLED = "true" }
+run = "./mvnw spring-boot:run"
+run_windows = "mvnw.cmd spring-boot:run"
+
 [tasks.frontend]
 dir = "frontend"
 depends = ["frontend:install"]

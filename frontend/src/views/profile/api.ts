@@ -4,8 +4,14 @@ import type { User } from '@/shared/api/types'
 
 import type {
   ChangePasswordRequest,
+  PublicUserProfile,
   UpdateProfileRequest,
 } from './types'
+
+export async function getPublicUserProfile(userId: string): Promise<PublicUserProfile> {
+  const response = await http.get<PublicUserProfile>(`/users/${userId}/profile`)
+  return response.data
+}
 
 export async function updateProfile(
   payload: UpdateProfileRequest,

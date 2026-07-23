@@ -107,4 +107,15 @@ describe('SummaryDetailView archived project write gates', () => {
     expect(getProject).toHaveBeenCalledWith('103')
     expect(wrapper.find('.header-actions').exists()).toBe(false)
   })
+
+  it('returns to projects when a missing summary has no project context', async () => {
+    vi.mocked(getSummary).mockRejectedValue(new Error('summary not found'))
+    const wrapper = mountView()
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      getSummaryListLocation: () => { name: string }
+    }
+    expect(vm.getSummaryListLocation()).toEqual({ name: 'projects' })
+  })
 })

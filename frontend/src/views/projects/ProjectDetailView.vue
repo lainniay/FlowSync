@@ -12,11 +12,11 @@ import {
   ElDialog,
   ElForm,
   ElFormItem,
+  ElInput,
   ElMessage,
   ElMessageBox,
   ElOption,
   ElSelect,
-  ElSkeleton,
   ElTabPane,
   ElTabs,
   ElTag,
@@ -30,19 +30,25 @@ import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/dialog/style/css'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
+import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/message/style/css'
 import 'element-plus/es/components/message-box/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/skeleton/style/css'
 import 'element-plus/es/components/tab-pane/style/css'
 import 'element-plus/es/components/tabs/style/css'
 import 'element-plus/es/components/tag/style/css'
 
 import { fetchAllPages } from '@/shared/api/pagination'
 import { getApiErrorMessage } from '@/shared/api/errors'
+import { formatDateTime } from '@/shared/format'
 import { useAuthStore } from '@/stores/auth'
+import MaterialIcon from '@/components/MaterialIcon.vue'
+import UserLink from '@/components/UserLink.vue'
 import { getUsers } from '@/views/admin/api'
+import AiTaskPlanView from '@/views/ai/AiTaskPlanView.vue'
+import SummaryListView from '@/views/summaries/SummaryListView.vue'
+import TaskListView from '@/views/tasks/TaskListView.vue'
 import type {
   Priority,
   ProjectStatus,
@@ -106,10 +112,16 @@ const project = ref<Project | null>(null)
 const loading = ref(false)
 const loaded = ref(false)
 const errorMessage = ref('')
-const activeTab = ref('overview')
+const activeTab = ref(
+  route.query.tab === 'summaries' ? 'summaries' : 'overview',
+)
 
 const editDialogVisible = ref(false)
+const aiPlanDialogVisible = ref(false)
 const formSubmitting = ref(false)
+const deleteDialogVisible = ref(false)
+const deleteConfirmation = ref('')
+const deleteSubmitting = ref(false)
 
 const transferDialogVisible = ref(false)
 const transferSubmitting = ref(false)
@@ -125,6 +137,7 @@ type TransferOwnerOption = {
 const transferOwnerOptions = ref<readonly TransferOwnerOption[]>([])
 
 const membersPanelRef = ref<InstanceType<typeof ProjectMembersPanel> | null>(null)
+const tasksPanelRef = ref<InstanceType<typeof TaskListView> | null>(null)
 const invitationsPanelRef = ref<InstanceType<
   typeof ProjectInvitationsPanel
 > | null>(null)
@@ -178,6 +191,33 @@ const canUseAiPlan = computed(() => (
   && !isArchived.value
 ))
 
+const taskProgress = computed(() => {
+  const stats = project.value?.taskStats
+  if (!stats || stats.total === 0) return 0
+  return Math.min(100, Math.max(0, Math.round((stats.completed / stats.total) * 100)))
+})
+
+const remainingTime = computed(() => {
+  const endDate = project.value?.endDate
+  if (!endDate) return { label: '剩余', value: '未设置' }
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const deadline = new Date(`${endDate}T00:00:00`)
+  const days = Math.round((deadline.getTime() - today.getTime()) / 86_400_000)
+
+  if (days === 0) return { label: '截止', value: '今天' }
+  return days >= 0
+    ? { label: '剩余', value: `${days} 天` }
+    : { label: '已逾期', value: `${Math.abs(days)} 天` }
+})
+
+const canConfirmDelete = computed(() => (
+  Boolean(project.value)
+  && deleteConfirmation.value === project.value?.name
+  && !deleteSubmitting.value
+))
+
 const transferRules: FormRules<{ ownerId: string }> = {
   ownerId: [
     { required: true, message: '请选择新的 owner', trigger: 'change' },
@@ -216,6 +256,17 @@ async function reloadPanels(): Promise<void> {
   await Promise.all(reloadTasks)
 }
 
+function openInvitationDialog(): void {
+  invitationsPanelRef.value?.openCreateDialog()
+}
+
+async function handleAiPlanImported(): Promise<void> {
+  await Promise.all([
+    loadProject(),
+    tasksPanelRef.value?.reload() ?? Promise.resolve(),
+  ])
+}
+
 async function handleEditProject(
   payload: UpdateProjectRequest,
 ): Promise<void> {
@@ -242,7 +293,7 @@ async function handleArchiveProject(): Promise<void> {
 
   try {
     await ElMessageBox.confirm(
-      `确定要归档项目 ${project.value.name} 吗？归档后将禁止内容写入。`,
+      `确定要归档项目 ${project.value.name} 吗？归档后将禁止内容写入`,
       '归档项目',
       {
         confirmButtonText: '归档',
@@ -281,25 +332,20 @@ async function handleRestoreProject(): Promise<void> {
   }
 }
 
+function openDeleteDialog(): void {
+  deleteConfirmation.value = ''
+  deleteDialogVisible.value = true
+}
+
 async function handleDeleteProject(): Promise<void> {
   if (!project.value) return
 
-  try {
-    await ElMessageBox.confirm(
-      `确定要永久删除项目 ${project.value.name} 吗？此操作不可撤销。`,
-      '永久删除项目',
-      {
-        confirmButtonText: '永久删除',
-        cancelButtonText: '取消',
-        type: 'error',
-      },
-    )
-  } catch {
-    return
-  }
+  if (!canConfirmDelete.value) return
 
+  deleteSubmitting.value = true
   try {
     await deleteProject(project.value.id)
+    deleteDialogVisible.value = false
     ElMessage.success('项目已删除')
     await router.replace({ name: 'projects' })
   } catch (error) {
@@ -307,6 +353,8 @@ async function handleDeleteProject(): Promise<void> {
       error,
       '项目删除失败，请稍后重试',
     ))
+  } finally {
+    deleteSubmitting.value = false
   }
 }
 
@@ -400,19 +448,14 @@ function formatDateRange(current: Project): string {
   return `${current.startDate ?? '未设置'} 至 ${current.endDate ?? '未设置'}`
 }
 
-function formatDateTime(value: string | null): string {
-  if (!value) return '—'
-  return value.replace('T', ' ').slice(0, 16)
-}
-
-function goBack(): void {
-  void router.push({ name: 'projects' })
-}
-
 watch(projectId, () => {
   loaded.value = false
-  activeTab.value = 'overview'
+  activeTab.value = route.query.tab === 'summaries' ? 'summaries' : 'overview'
   void loadProject()
+})
+
+watch(activeTab, (tab) => {
+  if (tab === 'overview' && loaded.value) void loadProject()
 })
 
 onMounted(() => {
@@ -433,7 +476,7 @@ onMounted(() => {
         </p>
         <h1>{{ project?.name ?? '项目详情' }}</h1>
         <p v-if="project">
-          Owner {{ project.owner.displayName }} ·
+          Owner <UserLink :user-id="project.owner.id">{{ project.owner.displayName }}</UserLink> ·
           {{ formatDateRange(project) }}
         </p>
       </div>
@@ -446,19 +489,31 @@ onMounted(() => {
           v-if="canWrite"
           @click="editDialogVisible = true"
         >
+          <MaterialIcon name="edit" />
           编辑
         </el-button>
         <el-button
           v-if="canWrite"
           @click="openTransferDialog"
         >
+          <MaterialIcon name="switch_account" />
           转移 Owner
         </el-button>
         <el-button
-          v-if="canWrite && !isArchived"
+          v-if="canUseAiPlan"
+          data-testid="project-ai-plan-entry"
+          type="primary"
+          @click="aiPlanDialogVisible = true"
+        >
+          <MaterialIcon name="auto_awesome" />
+          AI 任务计划
+        </el-button>
+        <el-button
+          v-if="canWrite"
           type="warning"
           @click="handleArchiveProject"
         >
+          <MaterialIcon name="archive" />
           归档
         </el-button>
         <el-button
@@ -466,13 +521,15 @@ onMounted(() => {
           type="primary"
           @click="handleRestoreProject"
         >
+          <MaterialIcon name="unarchive" />
           恢复
         </el-button>
         <el-button
           v-if="canManage && isArchived"
           type="danger"
-          @click="handleDeleteProject"
+          @click="openDeleteDialog"
         >
+          <MaterialIcon name="delete_forever" />
           永久删除
         </el-button>
       </div>
@@ -483,10 +540,10 @@ onMounted(() => {
       data-testid="project-detail-content"
       :data-state="pageState"
     >
-      <el-skeleton
+      <div
         v-if="pageState === 'initialLoading'"
-        animated
-        :rows="8"
+        aria-label="加载中"
+        class="initial-loading-space"
       />
 
       <div
@@ -534,145 +591,132 @@ onMounted(() => {
           v-if="isArchived"
           :closable="false"
           show-icon
-          title="项目已归档，内容写操作已禁用，仅可恢复或永久删除。"
+          title="项目已归档，内容写操作已禁用，仅可恢复或永久删除"
           type="warning"
         />
 
         <el-tabs v-model="activeTab">
           <el-tab-pane label="概览" name="overview">
-            <dl class="overview-grid">
-              <div>
-                <dt>项目名称</dt>
-                <dd>{{ project.name }}</dd>
+            <div class="overview-layout">
+              <section class="overview-stats" aria-label="项目统计">
+                <div class="overview-stat">
+                  <span>成员</span>
+                  <strong data-testid="overview-member-count">{{ project.memberCount }}</strong>
+                </div>
+                <div class="overview-stat">
+                  <span>任务</span>
+                  <strong data-testid="overview-task-count">{{ project.taskStats.total }}</strong>
+                </div>
+                <div class="overview-stat">
+                  <span>已完成</span>
+                  <strong data-testid="overview-completed-count">
+                    {{ project.taskStats.completed }}
+                  </strong>
+                </div>
+                <div class="overview-stat">
+                  <span>{{ remainingTime.label }}</span>
+                  <strong data-testid="overview-remaining-time">{{ remainingTime.value }}</strong>
+                </div>
+              </section>
+
+              <section class="overview-card progress-card">
+                <header>
+                  <h3>项目整体进度</h3>
+                  <strong>{{ taskProgress }}%</strong>
+                </header>
+                <div
+                  class="progress-track"
+                  role="progressbar"
+                  aria-label="项目整体进度"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  :aria-valuenow="taskProgress"
+                >
+                  <span :style="{ width: `${taskProgress}%` }" />
+                </div>
+                <p>已完成 {{ project.taskStats.completed }} / {{ project.taskStats.total }} 个任务</p>
+              </section>
+
+              <div class="overview-details">
+                <section class="overview-card">
+                  <h3>项目说明</h3>
+                  <p class="project-description">{{ project.description ?? '暂无项目说明' }}</p>
+                </section>
+                <section class="overview-card project-information">
+                  <h3>项目信息</h3>
+                  <dl>
+                    <div>
+                      <dt>负责人</dt>
+                      <dd><UserLink :user-id="project.owner.id">{{ project.owner.displayName }}</UserLink></dd>
+                    </div>
+                    <div><dt>项目日期</dt><dd>{{ formatDateRange(project) }}</dd></div>
+                    <div><dt>状态</dt><dd>{{ statusLabels[project.status] }}</dd></div>
+                    <div><dt>优先级</dt><dd>{{ priorityLabels[project.priority] }}</dd></div>
+                    <div><dt>更新时间</dt><dd>{{ formatDateTime(project.updatedAt) }}</dd></div>
+                  </dl>
+                </section>
               </div>
-              <div>
-                <dt>Owner</dt>
-                <dd>{{ project.owner.displayName }}</dd>
-              </div>
-              <div>
-                <dt>项目描述</dt>
-                <dd>{{ project.description ?? '—' }}</dd>
-              </div>
-              <div>
-                <dt>成员数量</dt>
-                <dd>{{ project.memberCount }}</dd>
-              </div>
-              <div>
-                <dt>任务统计</dt>
-                <dd>
-                  {{ project.taskStats.completed }}/{{ project.taskStats.total }}
-                </dd>
-              </div>
-              <div>
-                <dt>创建时间</dt>
-                <dd>{{ formatDateTime(project.createdAt) }}</dd>
-              </div>
-              <div>
-                <dt>更新时间</dt>
-                <dd>{{ formatDateTime(project.updatedAt) }}</dd>
-              </div>
-              <div>
-                <dt>归档时间</dt>
-                <dd>{{ formatDateTime(project.archivedAt) }}</dd>
-              </div>
-            </dl>
+            </div>
           </el-tab-pane>
 
           <el-tab-pane label="成员" name="members">
             <ProjectMembersPanel
               ref="membersPanelRef"
               :can-add-members="canAddMembers"
+              :can-invite-members="canCreateInvitations"
               :can-remove-members="canRemoveMembers"
               :project="project"
+              @invite="openInvitationDialog"
             />
-          </el-tab-pane>
-
-          <el-tab-pane
-            v-if="canViewInvitations"
-            data-testid="project-invitations-tab"
-            label="邀请"
-            name="invitations"
-          >
             <ProjectInvitationsPanel
+              v-if="canViewInvitations"
               ref="invitationsPanelRef"
+              class="member-invitations"
               :can-cancel-invitations="canCancelInvitations"
               :can-create-invitations="canCreateInvitations"
               :project="project"
+              :show-create-action="false"
             />
           </el-tab-pane>
 
           <el-tab-pane label="任务" name="tasks">
-            <div
-              class="module-entry"
+            <TaskListView
+              ref="tasksPanelRef"
               data-testid="project-tasks-entry"
-            >
-              <div>
-                <h3>项目任务</h3>
-                <p>查看和管理当前项目的任务、状态与进度记录。</p>
-              </div>
-              <RouterLink
-                :to="{
-                  name: 'tasks',
-                  query: { projectId: project.id },
-                }"
-              >
-                <el-button type="primary">
-                  查看项目任务
-                </el-button>
-              </RouterLink>
-            </div>
+              embedded
+              :project="project"
+            />
           </el-tab-pane>
 
           <el-tab-pane label="总结" name="summaries">
-            <div
-              class="module-entry"
+            <SummaryListView
               data-testid="project-summaries-entry"
-            >
-              <div>
-                <h3>项目总结</h3>
-                <p>查看当前项目的阶段总结与最终总结。</p>
-              </div>
-              <RouterLink
-                :to="{
-                  name: 'summaries',
-                  query: { projectId: project.id },
-                }"
-              >
-                <el-button type="primary">
-                  查看项目总结
-                </el-button>
-              </RouterLink>
-            </div>
+              embedded
+              :project="project"
+            />
           </el-tab-pane>
 
-          <el-tab-pane
-            v-if="canUseAiPlan"
-            label="AI 计划"
-            name="ai-plan"
-          >
-            <div
-              class="module-entry"
-              data-testid="project-ai-plan-entry"
-            >
-              <div>
-                <h3>AI 任务计划</h3>
-                <p>生成临时计划，人工审阅后导入为正式任务。</p>
-              </div>
-              <RouterLink
-                :to="{
-                  name: 'ai-task-plan',
-                  params: { projectId: project.id },
-                }"
-              >
-                <el-button type="primary">
-                  进入 AI 计划
-                </el-button>
-              </RouterLink>
-            </div>
-          </el-tab-pane>
         </el-tabs>
       </template>
     </section>
+
+    <el-dialog
+      v-model="aiPlanDialogVisible"
+      align-center
+      destroy-on-close
+      :teleported="false"
+      title="AI 任务计划"
+      width="min(1400px, 94vw)"
+    >
+      <AiTaskPlanView
+        v-if="project"
+        auto-generate
+        dialog-mode
+        :project-id="project.id"
+        @close="aiPlanDialogVisible = false"
+        @imported="handleAiPlanImported"
+      />
+    </el-dialog>
 
     <ProjectFormDialog
       v-model:visible="editDialogVisible"
@@ -688,7 +732,7 @@ onMounted(() => {
       width="480px"
     >
       <p class="dialog-note">
-        选择新的 USER 作为项目负责人。原 owner 会保留为普通成员。
+        选择新的 USER 作为项目负责人，原 owner 会保留为普通成员
       </p>
 
       <el-form
@@ -744,15 +788,53 @@ onMounted(() => {
       </template>
     </el-dialog>
 
-    <footer class="page-footer">
-      <el-button
-        class="back-button"
-        type="primary"
-        @click="goBack"
-      >
-        返回
-      </el-button>
-    </footer>
+    <el-dialog
+      v-model="deleteDialogVisible"
+      title="永久删除项目"
+      width="520px"
+      @closed="deleteConfirmation = ''"
+    >
+      <div v-if="project" class="delete-confirmation">
+        <p>
+          仅已归档项目可以永久删除，当前项目归档于
+          {{ formatDateTime(project.archivedAt) }}
+        </p>
+        <p>删除后，以下数据将无法恢复：</p>
+        <ul>
+          <li>任务与进度记录</li>
+          <li>项目总结</li>
+          <li>邀请与成员关系</li>
+        </ul>
+        <label for="project-delete-confirmation">
+          输入项目名称 <strong>{{ project.name }}</strong> 以确认
+        </label>
+        <el-input
+          id="project-delete-confirmation"
+          v-model="deleteConfirmation"
+          autocomplete="off"
+          :disabled="deleteSubmitting"
+          :placeholder="project.name"
+        />
+      </div>
+
+      <template #footer>
+        <el-button
+          :disabled="deleteSubmitting"
+          @click="deleteDialogVisible = false"
+        >
+          取消
+        </el-button>
+        <el-button
+          :disabled="!canConfirmDelete"
+          :loading="deleteSubmitting"
+          type="danger"
+          @click="handleDeleteProject"
+        >
+          永久删除
+        </el-button>
+      </template>
+    </el-dialog>
+
   </section>
 </template>
 
@@ -800,17 +882,6 @@ onMounted(() => {
   gap: 8px;
 }
 
-.page-footer {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.back-button {
-  height: 43px;
-  padding: 0 20px;
-  font-size: 19px;
-}
-
 .content-panel {
   min-height: 360px;
   padding: 20px;
@@ -826,26 +897,115 @@ onMounted(() => {
   margin-bottom: 16px;
 }
 
-.overview-grid {
+.overview-layout {
+  display: grid;
+  gap: 20px;
+}
+
+.overview-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.overview-stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--fs-color-border, #dbe3ee);
+  border-radius: 8px;
+  background: var(--fs-color-surface, #fff);
+}
+
+.overview-stat span {
+  color: var(--fs-color-text-secondary, #64748b);
+  font-size: 14px;
+}
+
+.overview-stat strong {
+  color: var(--fs-color-text, #1f2937);
+  font-size: 24px;
+}
+
+.overview-card {
   display: grid;
   gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--fs-color-border, #dbe3ee);
+  border-radius: 8px;
+  background: var(--fs-color-surface, #fff);
+}
+
+.overview-card h3,
+.overview-card p,
+.overview-card dl {
   margin: 0;
 }
 
-.overview-grid div {
-  display: grid;
-  gap: 4px;
+.progress-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.overview-grid dt {
+.progress-card header strong {
+  color: var(--el-color-primary);
+  font-size: 20px;
+}
+
+.progress-track {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--el-color-primary-light-8);
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--el-color-primary);
+}
+
+.progress-card p,
+.project-description {
   color: var(--fs-color-text-secondary, #64748b);
-  font-size: 13px;
+  line-height: 1.7;
 }
 
-.overview-grid dd {
+.overview-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.8fr);
+  gap: 16px;
+}
+
+.project-information dl {
+  display: grid;
+  gap: 12px;
+}
+
+.project-information dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.project-information dt {
+  color: var(--fs-color-text-secondary, #64748b);
+}
+
+.project-information dd {
   margin: 0;
   color: var(--fs-color-text, #1f2937);
-  font-size: 14px;
+  text-align: right;
+}
+
+.member-invitations {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--fs-color-border, #dbe3ee);
 }
 
 .dialog-note {
@@ -854,30 +1014,18 @@ onMounted(() => {
   font-size: 14px;
 }
 
-.module-entry {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px;
-  border: 1px solid var(--fs-color-border, #dbe3ee);
-  border-radius: 8px;
+.delete-confirmation {
+  display: grid;
+  gap: 12px;
 }
 
-.module-entry h3,
-.module-entry p {
+.delete-confirmation p,
+.delete-confirmation ul {
   margin: 0;
 }
 
-.module-entry p {
-  margin-top: 6px;
-  color: var(--fs-color-text-secondary, #64748b);
-  font-size: 14px;
-}
-
-.module-entry a {
-  flex-shrink: 0;
-  text-decoration: none;
+.delete-confirmation label {
+  margin-top: 4px;
 }
 
 .transfer-owner-select {
@@ -913,11 +1061,12 @@ onMounted(() => {
 
   .content-panel {
     padding: 16px;
+    overflow-x: auto;
   }
 
-  .module-entry {
-    align-items: flex-start;
-    flex-direction: column;
+  .overview-stats,
+  .overview-details {
+    grid-template-columns: 1fr;
   }
 }
 </style>

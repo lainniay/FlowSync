@@ -1,6 +1,11 @@
 import { http } from '@/shared/api/http'
 
-import type { Overview, OverviewQuery } from './types'
+import type { AdminOverview, Overview, OverviewQuery } from './types'
+
+export async function getAdminOverview(): Promise<AdminOverview> {
+  const response = await http.get<AdminOverview>('/admin/overview')
+  return response.data
+}
 
 export async function getOverview(
   query?: OverviewQuery,

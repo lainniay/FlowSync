@@ -52,6 +52,22 @@ beforeEach(() => {
 })
 
 describe('UserListView', () => {
+  it('caps the detail drawer at the viewport width', async () => {
+    vi.mocked(getUsers).mockResolvedValue({
+      items: [],
+      page: 0,
+      size: 20,
+      totalElements: 0,
+      totalPages: 0,
+    })
+
+    const wrapper = shallowMount(UserListView)
+    await flushPromises()
+
+    expect(wrapper.get('el-drawer-stub').attributes('size'))
+      .toBe('min(400px, 100%)')
+  })
+
   it('loads the first active-user page', async () => {
     vi.mocked(getUsers).mockResolvedValue({
       items: [user],
@@ -78,6 +94,11 @@ describe('UserListView', () => {
       wrapper.get('[data-testid="user-content"]')
         .attributes('data-state'),
     ).toBe('success')
+    expect(wrapper.text()).not.toContain('用户 ID')
+    expect(wrapper.get('el-pagination-stub').attributes('layout'))
+      .toBe('total, prev, pager, next')
+    expect(wrapper.get('el-pagination-stub').attributes('page-sizes'))
+      .toBeUndefined()
   })
 
   it('shows empty after a successful empty response', async () => {

@@ -32,18 +32,18 @@ export type TaskListQuery = PaginationQuery & {
   readonly parentId?: string
   readonly dueBefore?: string
   readonly dueAfter?: string
+  readonly incomplete?: boolean
   readonly q?: string
 }
 
 export type TaskListFilters = {
   q: string
   projectId: string
-  assigneeId: string
   status: TaskStatus | ''
   priority: Priority | ''
-  parentId: string
   dueBefore: string
   dueAfter: string
+  incomplete: boolean
 }
 
 export type CreateTaskBody = {

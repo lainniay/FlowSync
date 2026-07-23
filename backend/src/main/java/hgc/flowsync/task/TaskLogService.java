@@ -49,8 +49,8 @@ public class TaskLogService {
 		LambdaQueryWrapper<TaskLog> query = Wrappers.<TaskLog>lambdaQuery()
 			.eq(TaskLog::getTaskId, taskId);
 		long totalElements = taskLogMapper.selectCount(query);
-		applySort(query, sort);
-		query.orderByAsc(TaskLog::getId)
+		boolean ascending = applySort(query, sort);
+		query.orderBy(true, ascending, TaskLog::getId)
 			.last("LIMIT " + size + " OFFSET " + (long) page * size);
 		return PageResponse.of(responses(taskLogMapper.selectList(query)), page, size, totalElements);
 	}
@@ -127,7 +127,7 @@ public class TaskLogService {
 			.toList();
 	}
 
-	private static void applySort(LambdaQueryWrapper<TaskLog> query, String sort) {
+	private static boolean applySort(LambdaQueryWrapper<TaskLog> query, String sort) {
 		String[] parts = sort.split(",", -1);
 		if (parts.length != 2 || !(parts[1].equals("asc") || parts[1].equals("desc"))) {
 			throw new BusinessException(ErrorCode.VALIDATION_ERROR);
@@ -138,5 +138,6 @@ public class TaskLogService {
 			case "progressPercent" -> query.orderBy(true, ascending, TaskLog::getProgressPercent);
 			default -> throw new BusinessException(ErrorCode.VALIDATION_ERROR);
 		}
+		return ascending;
 	}
 }
