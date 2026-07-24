@@ -1,0 +1,26 @@
+spring:
+  main:
+    web-application-type: none
+  devtools:
+    livereload:
+      enabled: false
+    restart:
+      enabled: false
+
+flowsync:
+  dev-seed:
+    enabled: ${FLOWSYNC_DEV_SEED_ENABLED:false}
+    project-marker: "[DEVSEED]"
+    username-prefix: devseed-user-
+    password: ${FLOWSYNC_DEV_SEED_PASSWORD:DevSeedPassword123!}
+    users: 100
+    projects: 100
+    members-per-project: 10
+    invitations-per-project: 3
+    tasks-per-project: 50
+    logs-per-task: 4
+    summaries-per-project: 10
+
+logging:
+  level:
+    hgc.flowsync: INFO

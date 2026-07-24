@@ -59,6 +59,25 @@ beforeEach(() => {
 })
 
 describe('ProjectMembersPanel', () => {
+  it('shows the invitation action in the member header and emits it', async () => {
+    const wrapper = mount(ProjectMembersPanel, {
+      props: {
+        project,
+        canAddMembers: false,
+        canInviteMembers: true,
+        canRemoveMembers: true,
+      },
+    })
+    await flushPromises()
+
+    const inviteButton = wrapper.findAll('button')
+      .find((button) => button.text().includes('邀请成员'))
+
+    expect(inviteButton).toBeDefined()
+    await inviteButton!.trigger('click')
+    expect(wrapper.emitted('invite')).toHaveLength(1)
+  })
+
   it('loads all user option pages when adding members', async () => {
     vi.mocked(getUsers)
       .mockResolvedValueOnce({

@@ -16,8 +16,8 @@ public class AiProperties {
 	private String apiKey;
 	private String model;
 	private Duration connectTimeout = Duration.ofSeconds(3);
-	private Duration readTimeout = Duration.ofSeconds(30);
-	private ResponseFormat responseFormat = ResponseFormat.NONE;
+	private Duration readTimeout = Duration.ofSeconds(120);
+	private ResponseFormat responseFormat = ResponseFormat.JSON_OBJECT;
 	private int maxResponseBytes = 1_048_576;
 	private int maxConcurrentRequests = 5;
 

@@ -197,7 +197,7 @@ class TaskLogControllerTests {
 
 		assertThat(logIds(session, task, "createdAt,desc", 0, 20))
 			.containsExactly(fourth.getId().toString(), third.getId().toString(),
-				first.getId().toString(), second.getId().toString());
+				second.getId().toString(), first.getId().toString());
 		assertThat(logIds(session, task, "createdAt,asc", 0, 20))
 			.containsExactly(first.getId().toString(), second.getId().toString(),
 				third.getId().toString(), fourth.getId().toString());
@@ -210,7 +210,7 @@ class TaskLogControllerTests {
 		assertThat(logIds(session, task, "createdAt,desc", 0, 2))
 			.containsExactly(fourth.getId().toString(), third.getId().toString());
 		assertThat(logIds(session, task, "createdAt,desc", 1, 2))
-			.containsExactly(first.getId().toString(), second.getId().toString());
+			.containsExactly(second.getId().toString(), first.getId().toString());
 		assertThat(logIds(session, task, "createdAt,desc", 9, 2)).isEmpty();
 
 		for (String query : List.of(

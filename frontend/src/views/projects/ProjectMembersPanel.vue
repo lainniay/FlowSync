@@ -17,7 +17,6 @@ import {
   ElMessageBox,
   ElOption,
   ElSelect,
-  ElSkeleton,
   ElTable,
   ElTableColumn,
 } from 'element-plus'
@@ -35,12 +34,14 @@ import 'element-plus/es/components/message/style/css'
 import 'element-plus/es/components/message-box/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/skeleton/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 
 import { fetchAllPages } from '@/shared/api/pagination'
 import { getApiErrorMessage } from '@/shared/api/errors'
+import { formatDateTime } from '@/shared/format'
+import MaterialIcon from '@/components/MaterialIcon.vue'
+import UserLink from '@/components/UserLink.vue'
 import { getUsers } from '@/views/admin/api'
 
 import {
@@ -50,12 +51,18 @@ import {
 } from './api'
 import type { Project, ProjectMember } from './types'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   project: Project
   canAddMembers: boolean
   canRemoveMembers: boolean
-}>()
+  canInviteMembers?: boolean
+}>(), {
+  canInviteMembers: false,
+})
 
+const emit = defineEmits<{
+  invite: []
+}>()
 const members = ref<ProjectMember[]>([])
 const loading = ref(false)
 const loaded = ref(false)
@@ -282,10 +289,6 @@ async function handleRemoveMember(member: ProjectMember): Promise<void> {
   }
 }
 
-function formatDateTime(value: string): string {
-  return value.replace('T', ' ').slice(0, 16)
-}
-
 function canRemoveMember(member: ProjectMember): boolean {
   return props.canRemoveMembers
     && member.user.id !== props.project.owner.id
@@ -324,25 +327,28 @@ defineExpose({ reload: loadMembers })
 
       <div class="panel-actions">
         <el-button
-          :loading="loading"
-          @click="loadMembers"
+          v-if="canInviteMembers"
+          type="primary"
+          @click="emit('invite')"
         >
-          刷新
+          <MaterialIcon name="person_add" />
+          邀请成员
         </el-button>
         <el-button
           v-if="canAddMembers"
           type="primary"
           @click="openAddDialog"
         >
+          <MaterialIcon name="group_add" />
           添加成员
         </el-button>
       </div>
     </header>
 
-    <el-skeleton
+    <div
       v-if="loading && !loaded"
-      animated
-      :rows="4"
+      aria-label="加载中"
+      class="initial-loading-space"
     />
 
     <div
@@ -367,7 +373,9 @@ defineExpose({ reload: loadMembers })
     >
       <el-table-column label="成员" min-width="160">
         <template #default="{ row }">
-          {{ row.user.displayName }}
+          <UserLink :user-id="(row as ProjectMember).user.id">
+            {{ row.user.displayName }}
+          </UserLink>
           <span
             v-if="row.user.id === project.owner.id"
             class="owner-badge"
@@ -376,8 +384,6 @@ defineExpose({ reload: loadMembers })
           </span>
         </template>
       </el-table-column>
-
-      <el-table-column label="用户 ID" prop="user.id" width="100" />
 
       <el-table-column label="加入时间" min-width="150">
         <template #default="{ row }">
@@ -398,6 +404,7 @@ defineExpose({ reload: loadMembers })
             type="danger"
             @click="handleRemoveMember(row as ProjectMember)"
           >
+            <MaterialIcon name="person_remove" :size="18" />
             移除
           </el-button>
         </template>
@@ -414,7 +421,7 @@ defineExpose({ reload: loadMembers })
       width="480px"
     >
       <p class="dialog-note">
-        仅 ADMIN 可直接添加 USER 成员。从列表中选择尚未加入项目的用户。
+        仅 ADMIN 可直接添加 USER 成员，从列表中选择尚未加入项目的用户
       </p>
 
       <el-form
@@ -508,6 +515,7 @@ defineExpose({ reload: loadMembers })
   color: var(--fs-color-primary, #2563eb);
   font-size: 12px;
 }
+
 
 .dialog-note {
   margin: 0 0 16px;

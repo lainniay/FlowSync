@@ -16,7 +16,7 @@ const router = useRouter()
 <template>
   <el-result
     icon="warning"
-    sub-title="当前账号没有访问该页面的权限。"
+    sub-title="当前账号没有访问该页面的权限"
     title="403 无权限"
   >
     <template #extra>

@@ -56,6 +56,88 @@ class ProjectMembershipControllerTests {
 	private PasswordEncoder passwordEncoder;
 
 	@Test
+	void authenticatedUserFiltersProjectsWithUsernameOptions() throws Exception {
+		User owner = insertUser(SystemRole.USER, true);
+		User participant = insertUser(SystemRole.USER, true);
+		User admin = insertUser(SystemRole.ADMIN, true);
+		Project matching = insertProject(owner);
+		insertProject(owner);
+		insertMember(matching, participant);
+
+		mockMvc.perform(get("/api/user-options")
+				.param("q", participant.getUsername())
+				.session(login(owner).session()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()").value(1))
+			.andExpect(jsonPath("$[0].id").value(participant.getId().toString()))
+			.andExpect(jsonPath("$[0].username").value(participant.getUsername()))
+			.andExpect(jsonPath("$[0].displayName").doesNotExist());
+		mockMvc.perform(get("/api/user-options")
+				.param("q", admin.getUsername())
+				.session(login(owner).session()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()").value(0));
+		mockMvc.perform(get("/api/projects")
+				.param("userId", participant.getId().toString())
+				.session(login(owner).session()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.totalElements").value(1))
+			.andExpect(jsonPath("$.items[0].id").value(matching.getId().toString()));
+		mockMvc.perform(get("/api/projects")
+				.param("myRole", "OWNER")
+				.session(login(owner).session()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.totalElements").value(2));
+		mockMvc.perform(get("/api/projects")
+				.param("myRole", "MEMBER")
+				.session(login(participant).session()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.totalElements").value(1))
+			.andExpect(jsonPath("$.items[0].id").value(matching.getId().toString()));
+		mockMvc.perform(get("/api/projects")
+				.param("myRole", "OWNER")
+				.session(login(admin).session()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.totalElements").value(0));
+	}
+
+	@Test
+	void ownerSearchesEligibleInvitationCandidatesByName() throws Exception {
+		User owner = insertUser(SystemRole.USER, true);
+		User eligible = rename(insertUser(SystemRole.USER, true), "Candidate Eligible");
+		User member = rename(insertUser(SystemRole.USER, true), "Candidate Member");
+		User pending = rename(insertUser(SystemRole.USER, true), "Candidate Pending");
+		rename(insertUser(SystemRole.USER, false), "Candidate Inactive");
+		rename(insertUser(SystemRole.ADMIN, true), "Candidate Admin");
+		Project project = insertProject(owner);
+		insertMember(project, member);
+		insertInvitation(project, pending, owner, InvitationStatus.PENDING);
+
+		mockMvc.perform(get("/api/projects/{projectId}/invitation-candidates", project.getId())
+				.param("q", "Candidate")
+				.session(login(owner).session()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()").value(1))
+			.andExpect(jsonPath("$[0].id").value(eligible.getId().toString()))
+			.andExpect(jsonPath("$[0].displayName").value("Candidate Eligible"))
+			.andExpect(jsonPath("$[0].username").value(eligible.getUsername()))
+			.andExpect(jsonPath("$[0].phone").doesNotExist())
+			.andExpect(jsonPath("$[0].email").doesNotExist());
+		mockMvc.perform(get("/api/projects/{projectId}/invitation-candidates", project.getId())
+				.param("q", "C")
+				.session(login(owner).session()))
+			.andExpect(status().isUnprocessableEntity());
+		mockMvc.perform(get("/api/projects/{projectId}/invitation-candidates", project.getId())
+				.param("q", "  ")
+				.session(login(owner).session()))
+			.andExpect(status().isUnprocessableEntity());
+		mockMvc.perform(get("/api/projects/{projectId}/invitation-candidates", project.getId())
+				.param("q", "Candidate")
+				.session(login(member).session()))
+			.andExpect(status().isForbidden());
+	}
+
+	@Test
 	void adminAddsMembersAndCancelsTheirPendingInvitations() throws Exception {
 		User owner = insertUser(SystemRole.USER, true);
 		User admin = insertUser(SystemRole.ADMIN, true);
@@ -386,6 +468,12 @@ class ProjectMembershipControllerTests {
 		member.setUserId(owner.getId());
 		projectMemberMapper.insert(member);
 		return projectMapper.selectById(project.getId());
+	}
+
+	private User rename(User user, String displayName) {
+		user.setDisplayName(displayName);
+		userMapper.updateById(user);
+		return userMapper.selectById(user.getId());
 	}
 
 	private ProjectInvitation insertInvitation(

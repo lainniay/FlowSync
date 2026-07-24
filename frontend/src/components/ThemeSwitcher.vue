@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Moon, Sunny } from '@element-plus/icons-vue'
-import { ElIcon } from 'element-plus'
-import 'element-plus/es/components/icon/style/css'
 
+import MaterialIcon from '@/components/MaterialIcon.vue'
 import { useThemeStore } from '@/stores/theme'
 
 const themeStore = useThemeStore()
@@ -32,12 +30,8 @@ function toggleTheme(): void {
   >
     <span class="check">
       <span class="icon">
-        <el-icon class="sun" :size="12">
-          <Sunny />
-        </el-icon>
-        <el-icon class="moon" :size="12">
-          <Moon />
-        </el-icon>
+        <MaterialIcon class="sun" name="light_mode" :size="12" />
+        <MaterialIcon class="moon" name="dark_mode" :size="12" />
       </span>
     </span>
   </button>
@@ -83,7 +77,7 @@ function toggleTheme(): void {
   overflow: hidden;
 }
 
-.icon :deep(.el-icon) {
+.icon :deep(.material-icon) {
   position: absolute;
   top: 3px;
   left: 3px;

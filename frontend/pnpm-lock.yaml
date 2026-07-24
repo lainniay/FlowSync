@@ -8,9 +8,9 @@ importers:
 
   .:
     dependencies:
-      '@element-plus/icons-vue':
-        specifier: ^2.3.2
-        version: 2.3.2(vue@3.5.39(typescript@6.0.3))
+      '@material-symbols/svg-400':
+        specifier: ^0.45.8
+        version: 0.45.8
       axios:
         specifier: ^1.18.1
         version: 1.18.1
@@ -452,6 +452,9 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@material-symbols/svg-400@0.45.8':
+    resolution: {integrity: sha512-Z3xWWza+RFg6TPwzqPbN9rUp4ElAp4vuBGNkozvGK42vLXXmcd13xJvpbwEqD2PwM3pnD0TVU2ghm3fGyNCRVg==}
 
   '@mswjs/interceptors@0.41.9':
     resolution: {integrity: sha512-VVPPgHyQ6ShqnrmDWuxjmUIsO9gWyOZFmuOfLd9LfBGQJwZfy0gvv9pbHSJuoFNIYC7ZDX9aoFwowjcdSC4E8w==}
@@ -2907,6 +2910,8 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@material-symbols/svg-400@0.45.8': {}
 
   '@mswjs/interceptors@0.41.9':
     dependencies:

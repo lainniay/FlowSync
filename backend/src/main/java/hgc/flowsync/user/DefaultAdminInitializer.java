@@ -8,8 +8,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.Assert;
+import org.springframework.core.annotation.Order;
 
 @Component
+@Order(0)
 public class DefaultAdminInitializer implements ApplicationRunner {
 
 	private final UserMapper userMapper;

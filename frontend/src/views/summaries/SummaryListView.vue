@@ -4,8 +4,9 @@ import {
   onMounted,
   reactive,
   ref,
+  watch,
 } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import {
   ElAlert,
   ElButton,
@@ -18,7 +19,6 @@ import {
   ElOption,
   ElPagination,
   ElSelect,
-  ElSkeleton,
   ElTable,
   ElTableColumn,
   ElTag,
@@ -33,16 +33,24 @@ import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/skeleton/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
+
+import MaterialIcon from '@/components/MaterialIcon.vue'
+import ProjectLink from '@/components/ProjectLink.vue'
+import UserLink from '@/components/UserLink.vue'
+import { formatDateTime } from '@/shared/format'
 import type { FormInstance, FormRules } from 'element-plus'
 
 import { getApiErrorMessage } from '@/shared/api/errors'
+import { fetchAllPages, PAGE_SIZE } from '@/shared/api/pagination'
 import type { SummaryType } from '@/shared/api/types'
 import { useAuthStore } from '@/stores/auth'
-import { getProject } from '@/views/projects/api'
+import { getProject, getProjects } from '@/views/projects/api'
+import type { Project } from '@/views/projects/types'
+import { getTasks } from '@/views/tasks/api'
+import type { Task } from '@/views/tasks/types'
 
 import {
   createSummary,
@@ -69,9 +77,16 @@ type TagType =
   | 'danger'
   | 'info'
 
+const props = withDefaults(defineProps<{
+  embedded?: boolean
+  project?: Project | null
+}>(), {
+  embedded: false,
+  project: null,
+})
+
 const authStore = useAuthStore()
 const route = useRoute()
-const router = useRouter()
 
 const typeLabels: Record<SummaryType, string> = {
   STAGE: '阶段总结',
@@ -83,7 +98,9 @@ const typeTagTypes: Record<SummaryType, TagType> = {
   FINAL: 'success',
 }
 
-function getRouteProjectId(): string {
+function getContextProjectId(): string {
+  if (props.project) return props.project.id
+
   return typeof route.query.projectId === 'string'
     ? route.query.projectId
     : ''
@@ -91,10 +108,8 @@ function getRouteProjectId(): string {
 
 function createInitialFilters(): SummaryListFilters {
   return {
-    projectId: getRouteProjectId(),
-    taskId: '',
+    projectId: getContextProjectId(),
     type: '',
-    createdBy: '',
   }
 }
 
@@ -107,21 +122,30 @@ const appliedFilters = ref<SummaryListFilters>(
 )
 
 const summaries = ref<Summary[]>([])
+const projectOptions = ref<Project[]>([])
+const writableProjectOptions = computed(() => projectOptions.value
+  .filter((project) => project.archivedAt === null))
+const projectNames = computed(() => new Map(
+  projectOptions.value.map((project) => [project.id, project.name]),
+))
+const createTaskOptions = ref<Task[]>([])
+const createTasksLoading = ref(false)
+let createTasksRequestId = 0
 const page = ref(0)
-const size = ref(20)
 const totalElements = ref(0)
 const totalPages = ref(0)
 const loading = ref(false)
 const loaded = ref(false)
 const errorMessage = ref('')
+let summaryRequestId = 0
 const routeProjectWritable = ref<boolean | null>(
-  getRouteProjectId() ? null : true,
+  getContextProjectId() ? null : true,
 )
 
 const canCreate = computed(() => (
   authStore.currentUser?.systemRole === 'USER'
   && (
-    !getRouteProjectId()
+    !getContextProjectId()
     || routeProjectWritable.value === true
   )
 ))
@@ -130,10 +154,8 @@ const hasActiveFilters = computed(() => {
   const current = appliedFilters.value
 
   return (
-    current.projectId !== ''
-    || current.taskId !== ''
+    (!props.embedded && current.projectId !== '')
     || current.type !== ''
-    || current.createdBy !== ''
   )
 })
 
@@ -160,40 +182,42 @@ function buildQuery(): SummaryListQuery {
 
   return {
     projectId: current.projectId || undefined,
-    taskId: current.taskId || undefined,
     type: current.type || undefined,
-    createdBy: current.createdBy || undefined,
     page: page.value,
-    size: size.value,
+    size: PAGE_SIZE,
     sort: 'createdAt,desc',
   }
 }
 
 async function loadSummaries(): Promise<void> {
+  const requestId = ++summaryRequestId
   loading.value = true
   errorMessage.value = ''
 
   try {
     const result = await getSummaries(buildQuery())
+    if (requestId !== summaryRequestId) return
 
     summaries.value = [...result.items]
     page.value = result.page
-    size.value = result.size
     totalElements.value = result.totalElements
     totalPages.value = result.totalPages
   } catch (error) {
+    if (requestId !== summaryRequestId) return
     errorMessage.value = getApiErrorMessage(
       error,
       '总结列表加载失败，请稍后重试',
     )
   } finally {
-    loading.value = false
-    loaded.value = true
+    if (requestId === summaryRequestId) {
+      loading.value = false
+      loaded.value = true
+    }
   }
 }
 
 async function loadRouteProjectContext(): Promise<void> {
-  const routeProjectId = getRouteProjectId()
+  const routeProjectId = getContextProjectId()
 
   if (!routeProjectId) {
     routeProjectWritable.value = true
@@ -201,6 +225,11 @@ async function loadRouteProjectContext(): Promise<void> {
   }
 
   routeProjectWritable.value = null
+
+  if (props.project) {
+    routeProjectWritable.value = props.project.archivedAt === null
+    return
+  }
 
   try {
     const project = await getProject(routeProjectId)
@@ -213,9 +242,7 @@ async function loadRouteProjectContext(): Promise<void> {
 async function handleSearch(): Promise<void> {
   appliedFilters.value = {
     projectId: filters.projectId.trim(),
-    taskId: filters.taskId.trim(),
     type: filters.type,
-    createdBy: filters.createdBy.trim(),
   }
 
   page.value = 0
@@ -234,12 +261,6 @@ async function handleReset(): Promise<void> {
 
 async function handlePageChange(displayedPage: number): Promise<void> {
   page.value = displayedPage - 1
-  await loadSummaries()
-}
-
-async function handleSizeChange(nextSize: number): Promise<void> {
-  size.value = nextSize
-  page.value = 0
   await loadSummaries()
 }
 
@@ -264,19 +285,61 @@ const createForm = reactive({ ...defaultCreateForm })
 
 const createRules: FormRules = {
   projectId: [
-    { required: true, message: '请输入项目 ID', trigger: 'blur' },
+    { required: true, message: '请选择项目', trigger: 'change' },
   ],
   content: [
     { required: true, message: '请输入总结内容', trigger: 'blur' },
   ],
 }
 
-function openCreateDialog(): void {
+async function loadProjectOptions(): Promise<void> {
+  if (props.project) {
+    projectOptions.value = [props.project]
+    return
+  }
+
+  try {
+    const [active, archived] = await Promise.all([
+      fetchAllPages(getProjects, { archived: false, sort: 'name,asc' }),
+      fetchAllPages(getProjects, { archived: true, sort: 'name,asc' }),
+    ])
+    projectOptions.value = [...active, ...archived]
+  } catch (error) {
+    projectOptions.value = []
+    ElMessage.error(getApiErrorMessage(error, '项目选项加载失败，请稍后重试'))
+  }
+}
+
+async function loadCreateTasks(projectId: string): Promise<void> {
+  const requestId = ++createTasksRequestId
+  createForm.taskId = ''
+  createTaskOptions.value = []
+  if (!projectId) return
+
+  createTasksLoading.value = true
+  try {
+    const tasks = await fetchAllPages(getTasks, {
+      projectId,
+      sort: 'title,asc',
+    })
+    if (requestId !== createTasksRequestId) return
+    createTaskOptions.value = [...tasks]
+  } catch (error) {
+    if (requestId !== createTasksRequestId) return
+    createTaskOptions.value = []
+    ElMessage.error(getApiErrorMessage(error, '任务选项加载失败，请稍后重试'))
+  } finally {
+    if (requestId === createTasksRequestId) createTasksLoading.value = false
+  }
+}
+
+async function openCreateDialog(): Promise<void> {
   Object.assign(createForm, {
     ...defaultCreateForm,
-    projectId: getRouteProjectId(),
+    projectId: getContextProjectId(),
   })
   createDialogVisible.value = true
+  await loadCreateTasks(createForm.projectId)
 }
 
 async function handleCreate(): Promise<void> {
@@ -315,50 +378,49 @@ async function handleCreate(): Promise<void> {
   }
 }
 
-function goToSummary(summaryId: string): void {
-  const routeProjectId = getRouteProjectId()
+function getSummaryDetailLocation(summaryId: string) {
+  const routeProjectId = getContextProjectId()
 
-  void router.push({
+  return {
     name: 'summary-detail',
     params: { summaryId },
     ...(routeProjectId
       ? { query: { projectId: routeProjectId } }
       : {}),
-  })
-}
-
-function goToProject(): void {
-  const routeProjectId = getRouteProjectId()
-  if (!routeProjectId) return
-
-  void router.push({
-    name: 'project-detail',
-    params: { projectId: routeProjectId },
-  })
+  }
 }
 
 function truncateContent(content: string, maxLength = 60): string {
   return content.length > maxLength
-    ? content.slice(0, maxLength) + '...'
+    ? content.slice(0, maxLength) + '…'
     : content
-}
-
-function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 onMounted(() => {
   void Promise.all([
     loadSummaries(),
     loadRouteProjectContext(),
+    loadProjectOptions(),
   ])
 })
+
+watch(() => props.project?.id, (projectId) => {
+  if (!props.embedded || !projectId) return
+
+  const initial = createInitialFilters()
+  Object.assign(filters, initial)
+  appliedFilters.value = initial
+  page.value = 0
+  void Promise.all([
+    loadSummaries(),
+    loadRouteProjectContext(),
+    loadProjectOptions(),
+  ])
+})
+
+function projectName(projectId: string): string {
+  return projectNames.value.get(projectId) ?? '项目不可用'
+}
 
 defineExpose({
   openCreateDialog,
@@ -367,95 +429,72 @@ defineExpose({
 </script>
 
 <template>
-  <section class="summary-page">
+  <section
+    class="summary-page"
+    :class="{ 'summary-page--embedded': embedded }"
+  >
     <header class="page-header">
-      <div>
-        <h1>总结</h1>
-        <p>
-          查看可见项目内的阶段总结和最终总结。
-        </p>
-      </div>
+      <h1>{{ embedded ? '项目总结' : '总结' }}</h1>
 
       <div class="header-actions">
-        <el-button
-          v-if="getRouteProjectId()"
-          data-testid="back-to-project"
-          @click="goToProject"
-        >
-          返回项目
-        </el-button>
-
         <el-button
           v-if="canCreate"
           type="primary"
           @click="openCreateDialog"
         >
+          <MaterialIcon name="add" />
           创建总结
         </el-button>
 
-        <el-button
-          :loading="loading"
-          @click="loadSummaries"
-        >
-          刷新
-        </el-button>
       </div>
     </header>
 
     <section class="filter-panel">
       <el-form
-        :inline="true"
+        class="filter-layout"
+        label-position="top"
         :model="filters"
         @submit.prevent="handleSearch"
       >
-        <el-form-item label="项目 ID">
-          <el-input
+        <div class="filter-fields">
+          <el-form-item v-if="!embedded" label="项目">
+          <el-select
             v-model="filters.projectId"
             clearable
-            placeholder="可选"
-          />
-        </el-form-item>
+            filterable
+            placeholder="全部项目"
+            @change="handleSearch"
+          >
+            <el-option
+              v-for="project in projectOptions"
+              :key="project.id"
+              :label="project.name"
+              :value="project.id"
+            />
+          </el-select>
+          </el-form-item>
 
-        <el-form-item label="任务 ID">
-          <el-input
-            v-model="filters.taskId"
-            clearable
-            placeholder="可选，输入 none 查询项目级总结"
-          />
-        </el-form-item>
-
-        <el-form-item label="类型">
+          <el-form-item label="类型">
           <el-select
             v-model="filters.type"
             class="enum-select"
             placeholder="全部类型"
+            @change="handleSearch"
           >
             <el-option label="全部类型" value="" />
             <el-option label="阶段总结" value="STAGE" />
             <el-option label="最终总结" value="FINAL" />
           </el-select>
-        </el-form-item>
+          </el-form-item>
 
-        <el-form-item label="创建者 ID">
-          <el-input
-            v-model="filters.createdBy"
-            clearable
-            placeholder="可选"
-          />
-        </el-form-item>
+        </div>
 
-        <el-form-item>
-          <el-button
-            native-type="submit"
-            type="primary"
-          >
-            查询
-          </el-button>
-
+        <div class="filter-actions" role="group" aria-label="筛选操作">
           <el-button @click="handleReset">
+            <MaterialIcon name="filter_list_off" />
             重置
           </el-button>
-        </el-form-item>
+        </div>
       </el-form>
     </section>
 
@@ -464,10 +503,11 @@ defineExpose({
       data-testid="summary-content"
       :data-state="pageState"
     >
-      <el-skeleton
+      <div
         v-if="pageState === 'initialLoading'"
-        animated
-        :rows="6"
+        aria-label="加载中"
+        class="initial-loading-space"
+        role="status"
       />
 
       <div
@@ -490,40 +530,37 @@ defineExpose({
       </div>
 
       <template v-else>
-        <el-alert
-          v-if="pageState === 'refreshing'"
-          class="refresh-alert"
-          :closable="false"
-          title="正在刷新总结数据"
-          type="info"
-          show-icon
-        />
-
         <el-table
           :data="summaries"
           row-key="id"
         >
           <el-table-column
             label="内容预览"
-            min-width="220"
+            min-width="200"
           >
             <template #default="{ row }">
-              {{ truncateContent(row.content) }}
+              <router-link
+                class="summary-link"
+                :to="getSummaryDetailLocation((row as Summary).id)"
+              >
+                {{ truncateContent(row.content) }}
+              </router-link>
             </template>
           </el-table-column>
 
           <el-table-column
+            v-if="!embedded"
             label="项目"
-            prop="projectId"
-            width="100"
-          />
-
-          <el-table-column
-            label="关联任务"
-            width="110"
+            min-width="140"
           >
             <template #default="{ row }">
-              {{ row.taskId ?? '项目级' }}
+              <ProjectLink
+                v-if="projectNames.has((row as Summary).projectId)"
+                :project-id="(row as Summary).projectId"
+              >
+                {{ projectName((row as Summary).projectId) }}
+              </ProjectLink>
+              <span v-else>项目不可用</span>
             </template>
           </el-table-column>
 
@@ -543,13 +580,15 @@ defineExpose({
             min-width="100"
           >
             <template #default="{ row }">
-              {{ row.createdBy.displayName }}
+              <UserLink :user-id="(row as Summary).createdBy.id">
+                {{ row.createdBy.displayName }}
+              </UserLink>
             </template>
           </el-table-column>
 
           <el-table-column
             label="创建时间"
-            min-width="160"
+            width="140"
           >
             <template #default="{ row }">
               <span class="muted">{{ formatDateTime(row.createdAt) }}</span>
@@ -558,26 +597,10 @@ defineExpose({
 
           <el-table-column
             label="更新时间"
-            min-width="160"
+            width="140"
           >
             <template #default="{ row }">
               <span class="muted">{{ formatDateTime(row.updatedAt) }}</span>
-            </template>
-          </el-table-column>
-
-          <el-table-column
-            fixed="right"
-            label="操作"
-            width="100"
-          >
-            <template #default="{ row }">
-              <el-button
-                link
-                type="primary"
-                @click="goToSummary((row as Summary).id)"
-              >
-                查看
-              </el-button>
             </template>
           </el-table-column>
 
@@ -586,7 +609,9 @@ defineExpose({
               :description="
                 hasActiveFilters
                   ? '没有符合条件的总结'
-                  : '当前没有可见总结'
+                  : embedded
+                    ? '当前项目没有总结'
+                    : '当前没有可见总结'
               "
             >
               <el-button
@@ -603,12 +628,10 @@ defineExpose({
           v-if="totalElements > 0"
           class="summary-pagination"
           :current-page="page + 1"
-          layout="total, sizes, prev, pager, next"
-          :page-size="size"
-          :page-sizes="[10, 20, 50, 100]"
+          layout="total, prev, pager, next"
+          :page-size="PAGE_SIZE"
           :total="totalElements"
           @current-change="handlePageChange"
-          @size-change="handleSizeChange"
         />
       </template>
     </section>
@@ -626,18 +649,37 @@ defineExpose({
         :rules="createRules"
         label-position="top"
       >
-        <el-form-item label="项目 ID" prop="projectId">
-          <el-input
+        <el-form-item v-if="!embedded" label="项目" prop="projectId">
+          <el-select
             v-model="createForm.projectId"
-            placeholder="输入项目 ID"
-          />
+            filterable
+            placeholder="选择项目"
+            @change="loadCreateTasks"
+          >
+            <el-option
+              v-for="project in writableProjectOptions"
+              :key="project.id"
+              :label="project.name"
+              :value="project.id"
+            />
+          </el-select>
         </el-form-item>
 
-        <el-form-item label="关联任务 ID">
-          <el-input
+        <el-form-item label="关联任务">
+          <el-select
             v-model="createForm.taskId"
+            clearable
+            filterable
+            :loading="createTasksLoading"
             placeholder="可选，留空为项目级总结"
-          />
+          >
+            <el-option
+              v-for="task in createTaskOptions"
+              :key="task.id"
+              :label="task.title"
+              :value="task.id"
+            />
+          </el-select>
         </el-form-item>
 
         <el-form-item label="类型" prop="type">
@@ -680,7 +722,9 @@ defineExpose({
 <style scoped>
 .summary-page {
   display: grid;
+  min-width: 0;
   gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .page-header {
@@ -703,6 +747,7 @@ defineExpose({
 
 .header-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -714,16 +759,18 @@ defineExpose({
 }
 
 .filter-panel {
-  padding: 16px 16px 0;
+  padding: 16px;
 }
 
 .content-panel {
+  min-width: 0;
   min-height: 320px;
   padding: 20px;
+  overflow-x: auto;
 }
 
 .enum-select {
-  width: 140px;
+  width: 100%;
 }
 
 .feedback-state {
@@ -734,13 +781,18 @@ defineExpose({
   justify-items: center;
 }
 
-.refresh-alert {
-  margin-bottom: 12px;
-}
-
 .summary-pagination {
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.summary-link {
+  color: var(--fs-color-primary, #2563eb);
+  text-decoration: none;
+}
+
+.summary-link:hover {
+  text-decoration: underline;
 }
 
 .muted {
@@ -754,7 +806,7 @@ defineExpose({
 
   .content-panel {
     padding: 16px;
-    overflow-x: auto;
   }
+
 }
 </style>

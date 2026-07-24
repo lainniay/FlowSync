@@ -7,10 +7,10 @@ import {
   ElEmpty,
   ElForm,
   ElFormItem,
-  ElInput,
   ElMessage,
   ElMessageBox,
-  ElSkeleton,
+  ElOption,
+  ElSelect,
   ElTable,
   ElTableColumn,
   ElTag,
@@ -21,29 +21,40 @@ import 'element-plus/es/components/dialog/style/css'
 import 'element-plus/es/components/empty/style/css'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
-import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/message/style/css'
 import 'element-plus/es/components/message-box/style/css'
-import 'element-plus/es/components/skeleton/style/css'
+import 'element-plus/es/components/option/style/css'
+import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
 
 import { getApiErrorMessage } from '@/shared/api/errors'
+import { formatDateTime } from '@/shared/format'
+import MaterialIcon from '@/components/MaterialIcon.vue'
+import UserLink from '@/components/UserLink.vue'
 import type { InvitationStatus } from '@/shared/api/types'
 
 import {
   cancelProjectInvitation,
   createProjectInvitations,
+  getInvitationCandidates,
   getProjectInvitations,
 } from './api'
-import type { Project, ProjectInvitation } from './types'
+import type {
+  InvitationCandidate,
+  Project,
+  ProjectInvitation,
+} from './types'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   project: Project
   canCreateInvitations: boolean
   canCancelInvitations: boolean
-}>()
+  showCreateAction?: boolean
+}>(), {
+  showCreateAction: true,
+})
 
 const invitationStatusLabels: Record<InvitationStatus, string> = {
   PENDING: '待处理',
@@ -59,15 +70,34 @@ const errorMessage = ref('')
 
 const createDialogVisible = ref(false)
 const createSubmitting = ref(false)
-const userIdsInput = ref('')
+const candidateLoading = ref(false)
+const candidateOptions = ref<InvitationCandidate[]>([])
+const selectedCandidateIds = ref<string[]>([])
 
-function parseUserIds(value: string): string[] {
-  return [...new Set(
-    value
-      .split(/[\s,，]+/)
-      .map((item) => item.trim())
-      .filter(Boolean),
-  )]
+function openCreateDialog(): void {
+  candidateOptions.value = []
+  selectedCandidateIds.value = []
+  createDialogVisible.value = true
+}
+
+async function searchCandidates(query: string): Promise<void> {
+  const normalized = query.trim()
+  if (normalized.length < 2) {
+    candidateOptions.value = []
+    return
+  }
+
+  candidateLoading.value = true
+  try {
+    candidateOptions.value = [...await getInvitationCandidates(
+      props.project.id,
+      normalized,
+    )]
+  } catch (error) {
+    ElMessage.error(getApiErrorMessage(error, '候选用户加载失败，请稍后重试'))
+  } finally {
+    candidateLoading.value = false
+  }
 }
 
 async function loadInvitations(): Promise<void> {
@@ -88,10 +118,10 @@ async function loadInvitations(): Promise<void> {
 }
 
 async function handleCreateInvitations(): Promise<void> {
-  const userIds = parseUserIds(userIdsInput.value)
+  const userIds = selectedCandidateIds.value
 
   if (userIds.length === 0) {
-    ElMessage.warning('请输入至少一个用户 ID')
+    ElMessage.warning('请选择至少一个用户')
     return
   }
 
@@ -100,7 +130,7 @@ async function handleCreateInvitations(): Promise<void> {
   try {
     await createProjectInvitations(props.project.id, { userIds })
     createDialogVisible.value = false
-    userIdsInput.value = ''
+    selectedCandidateIds.value = []
     ElMessage.success('邀请已发送')
     await loadInvitations()
   } catch (error) {
@@ -142,16 +172,11 @@ async function handleCancelInvitation(
   }
 }
 
-function formatDateTime(value: string | null): string {
-  if (!value) return '—'
-  return value.replace('T', ' ').slice(0, 16)
-}
-
 onMounted(() => {
   void loadInvitations()
 })
 
-defineExpose({ reload: loadInvitations })
+defineExpose({ reload: loadInvitations, openCreateDialog })
 </script>
 
 <template>
@@ -159,30 +184,25 @@ defineExpose({ reload: loadInvitations })
     <header class="panel-header">
       <div>
         <h3>项目邀请</h3>
-        <p>owner 可发起邀请，owner 或 ADMIN 可取消待处理邀请。</p>
+        <p>仅 owner 可发起邀请，owner 或 ADMIN 可取消待处理邀请</p>
       </div>
 
       <div class="panel-actions">
         <el-button
-          :loading="loading"
-          @click="loadInvitations"
-        >
-          刷新
-        </el-button>
-        <el-button
-          v-if="canCreateInvitations"
+          v-if="canCreateInvitations && showCreateAction"
           type="primary"
-          @click="createDialogVisible = true"
+          @click="openCreateDialog"
         >
+          <MaterialIcon name="person_add" />
           发起邀请
         </el-button>
       </div>
     </header>
 
-    <el-skeleton
+    <div
       v-if="loading && !loaded"
-      animated
-      :rows="4"
+      aria-label="加载中"
+      class="initial-loading-space"
     />
 
     <div
@@ -207,13 +227,13 @@ defineExpose({ reload: loadInvitations })
     >
       <el-table-column label="被邀请人" min-width="140">
         <template #default="{ row }">
-          {{ row.invitee.displayName }}
+          <UserLink :user-id="row.invitee.id">{{ row.invitee.displayName }}</UserLink>
         </template>
       </el-table-column>
 
       <el-table-column label="邀请人" min-width="140">
         <template #default="{ row }">
-          {{ row.invitedBy.displayName }}
+          <UserLink :user-id="row.invitedBy.id">{{ row.invitedBy.displayName }}</UserLink>
         </template>
       </el-table-column>
 
@@ -253,6 +273,7 @@ defineExpose({ reload: loadInvitations })
             type="danger"
             @click="handleCancelInvitation(row as ProjectInvitation)"
           >
+            <MaterialIcon name="close" :size="18" />
             取消
           </el-button>
         </template>
@@ -268,18 +289,25 @@ defineExpose({ reload: loadInvitations })
       title="发起邀请"
       width="480px"
     >
-      <p class="dialog-note">
-        仅项目 owner 可以发起邀请。输入 USER 的用户 ID，多个 ID 可用逗号或换行分隔。
-      </p>
-
       <el-form @submit.prevent="handleCreateInvitations">
-        <el-form-item label="用户 ID 列表">
-          <el-input
-            v-model="userIdsInput"
-            placeholder="例如：3, 4"
-            :rows="4"
-            type="textarea"
-          />
+        <el-form-item label="邀请用户">
+          <el-select
+            v-model="selectedCandidateIds"
+            filterable
+            :loading="candidateLoading"
+            multiple
+            placeholder="输入展示名或用户名搜索"
+            remote
+            :remote-method="searchCandidates"
+          >
+            <el-option
+              v-for="candidate in candidateOptions"
+              :key="candidate.id"
+              :label="`${candidate.displayName}（${candidate.username}）`"
+              :value="candidate.id"
+            />
+          </el-select>
+          <p class="dialog-note">请输入至少 2 个字符搜索用户</p>
         </el-form-item>
       </el-form>
 
@@ -303,6 +331,10 @@ defineExpose({ reload: loadInvitations })
 .invitations-panel {
   display: grid;
   gap: 16px;
+}
+
+.invitations-panel :deep(.el-select) {
+  width: 100%;
 }
 
 .panel-header {

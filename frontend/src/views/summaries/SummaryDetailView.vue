@@ -12,24 +12,32 @@ import {
   ElDialog,
   ElInput,
   ElMessage,
+  ElMessageBox,
   ElOption,
   ElSelect,
-  ElSkeleton,
   ElTag,
 } from 'element-plus'
 import 'element-plus/es/components/alert/style/css'
 import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/dialog/style/css'
 import 'element-plus/es/components/input/style/css'
+import 'element-plus/es/components/message-box/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/skeleton/style/css'
 import 'element-plus/es/components/tag/style/css'
 
 import { getApiErrorMessage, hasApiStatus } from '@/shared/api/errors'
+import MaterialIcon from '@/components/MaterialIcon.vue'
+import ProjectLink from '@/components/ProjectLink.vue'
+import TaskLink from '@/components/TaskLink.vue'
+import UserLink from '@/components/UserLink.vue'
+import { formatDateTime } from '@/shared/format'
 import type { SummaryType } from '@/shared/api/types'
 import { useAuthStore } from '@/stores/auth'
 import { getProject } from '@/views/projects/api'
+import type { Project } from '@/views/projects/types'
+import { getTask } from '@/views/tasks/api'
+import type { Task } from '@/views/tasks/types'
 
 import {
   deleteSummary,
@@ -45,13 +53,16 @@ const authStore = useAuthStore()
 const summaryId = computed(() => route.params.summaryId as string)
 
 function getSummaryListLocation() {
-  const projectId = typeof route.query?.projectId === 'string'
+  const projectId = summary.value?.projectId ?? (typeof route.query?.projectId === 'string'
     ? route.query.projectId
-    : ''
+    : '')
+
+  if (!projectId) return { name: 'projects' }
 
   return {
-    name: 'summaries',
-    ...(projectId ? { query: { projectId } } : {}),
+    name: 'project-detail',
+    params: { projectId },
+    query: { tab: 'summaries' },
   }
 }
 
@@ -74,6 +85,8 @@ const typeTagTypes: Record<SummaryType, TagType> = {
 
 // --- Summary data ---
 const summary = ref<Summary | null>(null)
+const project = ref<Project | null>(null)
+const relatedTask = ref<Task | null>(null)
 const loading = ref(false)
 const loaded = ref(false)
 const errorMessage = ref('')
@@ -109,12 +122,22 @@ async function fetchSummary(): Promise<void> {
 
     // Fetch project owner for permission checks
     try {
-      const project = await getProject(summary.value.projectId)
-      projectOwner.value = project.owner
-      projectArchived.value = Boolean(project.archivedAt)
+      project.value = await getProject(summary.value.projectId)
+      projectOwner.value = project.value.owner
+      projectArchived.value = Boolean(project.value.archivedAt)
     } catch {
+      project.value = null
       projectOwner.value = null
       projectArchived.value = null
+    }
+    if (summary.value.taskId) {
+      try {
+        relatedTask.value = await getTask(summary.value.taskId)
+      } catch {
+        relatedTask.value = null
+      }
+    } else {
+      relatedTask.value = null
     }
   } catch (error) {
     if (hasApiStatus(error, 404)) {
@@ -175,12 +198,26 @@ async function handleEdit(): Promise<void> {
 }
 
 // --- Delete ---
-const deleteDialogVisible = ref(false)
 const deleteSubmitting = ref(false)
 
 async function handleDelete(): Promise<void> {
-  deleteSubmitting.value = true
+  if (deleteSubmitting.value) return
 
+  try {
+    await ElMessageBox.confirm(
+      '确定要删除这条总结吗？该操作不可撤销',
+      '删除总结',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'error',
+      },
+    )
+  } catch {
+    return
+  }
+
+  deleteSubmitting.value = true
   try {
     await deleteSummary(summaryId.value)
     ElMessage.success('总结已删除')
@@ -189,24 +226,9 @@ async function handleDelete(): Promise<void> {
     ElMessage.error(
       getApiErrorMessage(error, '删除总结失败，请稍后重试'),
     )
-    deleteDialogVisible.value = false
   } finally {
     deleteSubmitting.value = false
   }
-}
-
-function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-function goBack(): void {
-  void router.push(getSummaryListLocation())
 }
 
 onMounted(() => {
@@ -218,7 +240,7 @@ onMounted(() => {
   <section class="summary-detail-page">
     <template v-if="loading && !loaded">
       <div class="content-panel">
-        <el-skeleton animated :rows="6" />
+        <div aria-label="加载中" class="initial-loading-space" />
       </div>
     </template>
 
@@ -271,9 +293,20 @@ onMounted(() => {
             {{ typeLabels[summary.type] }}
           </h1>
           <div class="summary-meta">
-            <span>项目 {{ summary.projectId }}</span>
-            <span v-if="summary.taskId">关联任务 {{ summary.taskId }}</span>
-            <span>创建者 {{ summary.createdBy.displayName }}</span>
+            <span>
+              项目 <ProjectLink v-if="project" :project-id="project.id">{{ project.name }}</ProjectLink>
+              <template v-else>不可用</template>
+            </span>
+            <span v-if="summary.taskId">
+              关联任务 <TaskLink
+                v-if="relatedTask"
+                :task-id="relatedTask.id"
+                :project-id="summary.projectId"
+              >{{ relatedTask.title }}</TaskLink><template v-else>不可用</template>
+            </span>
+            <span>
+              创建者 <UserLink :user-id="summary.createdBy.id">{{ summary.createdBy.displayName }}</UserLink>
+            </span>
             <span class="muted">更新于 {{ formatDateTime(summary.updatedAt) }}</span>
           </div>
         </div>
@@ -283,13 +316,16 @@ onMounted(() => {
           class="header-actions"
         >
           <el-button @click="openEditDialog">
+            <MaterialIcon name="edit" />
             编辑
           </el-button>
 
           <el-button
+            :loading="deleteSubmitting"
             type="danger"
-            @click="deleteDialogVisible = true"
+            @click="handleDelete"
           >
+            <MaterialIcon name="delete" />
             删除
           </el-button>
         </div>
@@ -316,24 +352,29 @@ onMounted(() => {
         <div class="info-section">
           <h3>详细信息</h3>
           <dl class="meta-list">
-            <dt>项目 ID</dt>
-            <dd>{{ summary.projectId }}</dd>
+            <dt>项目</dt>
+            <dd>
+              <ProjectLink v-if="project" :project-id="project.id">{{ project.name }}</ProjectLink>
+              <span v-else>不可用</span>
+            </dd>
 
             <dt>关联任务</dt>
             <dd>
               <template v-if="summary.taskId">
-                <router-link
-                  :to="`/tasks/${summary.taskId}`"
-                  class="summary-link"
+                <TaskLink
+                  v-if="relatedTask"
+                  :task-id="summary.taskId"
+                  :project-id="summary.projectId"
                 >
-                  {{ summary.taskId }}
-                </router-link>
+                  {{ relatedTask.title }}
+                </TaskLink>
+                <span v-else>关联任务不可用</span>
               </template>
               <span v-else>项目级总结</span>
             </dd>
 
             <dt>创建者</dt>
-            <dd>{{ summary.createdBy.displayName }}</dd>
+            <dd><UserLink :user-id="summary.createdBy.id">{{ summary.createdBy.displayName }}</UserLink></dd>
 
             <dt>创建时间</dt>
             <dd>{{ formatDateTime(summary.createdAt) }}</dd>
@@ -389,39 +430,8 @@ onMounted(() => {
         </template>
       </el-dialog>
 
-      <!-- Delete confirmation -->
-      <el-dialog
-        v-model="deleteDialogVisible"
-        title="删除总结"
-        width="400px"
-      >
-        <p>确定要删除这条总结吗？该操作不可撤销。</p>
-
-        <template #footer>
-          <el-button @click="deleteDialogVisible = false">
-            取消
-          </el-button>
-
-          <el-button
-            type="danger"
-            :loading="deleteSubmitting"
-            @click="handleDelete"
-          >
-            确定删除
-          </el-button>
-        </template>
-      </el-dialog>
     </template>
 
-    <footer class="page-footer">
-      <el-button
-        class="back-button"
-        type="primary"
-        @click="goBack"
-      >
-        返回
-      </el-button>
-    </footer>
   </section>
 </template>
 
@@ -472,17 +482,6 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.page-footer {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.back-button {
-  height: 43px;
-  padding: 0 20px;
-  font-size: 19px;
-}
-
 .content-panel {
   border: 1px solid var(--fs-color-border, #dbe3ee);
   border-radius: 8px;
@@ -505,7 +504,9 @@ onMounted(() => {
 }
 
 .summary-content {
+  max-width: 70ch;
   color: var(--fs-color-text, #1f2937);
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
   line-height: 1.7;
 }
@@ -549,6 +550,12 @@ onMounted(() => {
 
 .muted {
   color: var(--fs-color-text-secondary, #64748b);
+}
+
+@media (max-width: 480px) {
+  .meta-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {

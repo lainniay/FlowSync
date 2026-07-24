@@ -61,6 +61,27 @@ public class UserService {
 	}
 
 	@Transactional(readOnly = true)
+	public PublicUserProfileResponse findPublicProfile(Long userId) {
+		User user = userMapper.selectById(userId);
+		if (user == null) {
+			throw new BusinessException(ErrorCode.NOT_FOUND);
+		}
+		return PublicUserProfileResponse.from(user);
+	}
+
+	@Transactional(readOnly = true)
+	public List<UserOptionResponse> findOptions(String q) {
+		return userMapper.selectList(Wrappers.<User>lambdaQuery()
+			.select(User::getId, User::getUsername)
+			.eq(User::isActive, true)
+			.eq(User::getSystemRole, SystemRole.USER)
+			.like(q != null && !q.isBlank(), User::getUsername, q == null ? null : q.trim())
+			.orderByAsc(User::getUsername)).stream()
+			.map(UserOptionResponse::from)
+			.toList();
+	}
+
+	@Transactional(readOnly = true)
 	public PageResponse<UserResponse> findAll(
 		String q,
 		SystemRole systemRole,

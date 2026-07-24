@@ -6,14 +6,6 @@ import {
   ref,
 } from 'vue'
 import {
-  Clock,
-  Edit,
-  Key,
-  Message,
-  Phone,
-  User as UserIcon,
-} from '@element-plus/icons-vue'
-import {
   ElAlert,
   ElButton,
   ElDialog,
@@ -24,14 +16,12 @@ import {
   ElEmpty,
   ElForm,
   ElFormItem,
-  ElIcon,
   ElInput,
   ElMessage,
   ElMessageBox,
   ElOption,
   ElPagination,
   ElSelect,
-  ElSkeleton,
   ElTable,
   ElTableColumn,
   ElTag,
@@ -48,7 +38,6 @@ import 'element-plus/es/components/dropdown/style/css'
 import 'element-plus/es/components/dropdown-item/style/css'
 import 'element-plus/es/components/dropdown-menu/style/css'
 import 'element-plus/es/components/empty/style/css'
-import 'element-plus/es/components/icon/style/css'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
 import 'element-plus/es/components/input/style/css'
@@ -57,12 +46,15 @@ import 'element-plus/es/components/message-box/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/skeleton/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
 
+import MaterialIcon from '@/components/MaterialIcon.vue'
+import UserLink from '@/components/UserLink.vue'
 import { getApiErrorMessage } from '@/shared/api/errors'
+import { formatDateTime } from '@/shared/format'
+import { PAGE_SIZE } from '@/shared/api/pagination'
 import type {
   SystemRole,
   User,
@@ -121,7 +113,6 @@ const appliedFilters = ref<UserListFilters>(createInitialFilters())
 
 const users = ref<User[]>([])
 const page = ref(0)
-const size = ref(20)
 const totalElements = ref(0)
 const totalPages = ref(0)
 const loading = ref(false)
@@ -181,7 +172,7 @@ function buildQuery(): UserListQuery {
     systemRole: current.systemRole || undefined,
     active: current.active,
     page: page.value,
-    size: size.value,
+      size: PAGE_SIZE,
     sort: 'createdAt,desc',
   }
 }
@@ -198,7 +189,6 @@ async function loadUsers(
 
     users.value = [...result.items]
     page.value = result.page
-    size.value = result.size
     totalElements.value = result.totalElements
     totalPages.value = result.totalPages
   } catch (error) {
@@ -235,13 +225,6 @@ async function handlePageChange(
   displayedPage: number,
 ): Promise<void> {
   await loadUsers(displayedPage - 1)
-}
-
-async function handleSizeChange(
-  nextSize: number,
-): Promise<void> {
-  size.value = nextSize
-  await loadUsers(0)
 }
 
 function openCreateDialog(): void {
@@ -420,10 +403,6 @@ async function handleResetPasswordSubmit(): Promise<void> {
   }
 }
 
-function formatDateTime(value: string): string {
-  return value.replace('T', ' ').slice(0, 16)
-}
-
 function getUserInitial(displayName: string): string {
   return displayName.trim().charAt(0) || '?'
 }
@@ -469,24 +448,14 @@ onMounted(() => {
 <template>
   <section class="user-page">
     <header class="page-header">
-      <div>
-        <h1>用户管理</h1>
-        <p>
-          查询、创建、编辑、启停和重置系统用户密码。
-        </p>
-      </div>
+      <h1>用户管理</h1>
 
       <div class="header-actions">
-        <el-button
-          :loading="loading"
-          @click="loadUsers()"
-        >
-          刷新
-        </el-button>
         <el-button
           type="primary"
           @click="openCreateDialog"
         >
+          <MaterialIcon name="person_add" />
           创建用户
         </el-button>
       </div>
@@ -494,20 +463,22 @@ onMounted(() => {
 
     <section class="filter-panel">
       <el-form
-        :inline="true"
+        class="filter-layout"
+        label-position="top"
         :model="filters"
         @submit.prevent="handleSearch"
       >
-        <el-form-item label="搜索">
+        <div class="filter-fields">
+          <el-form-item label="搜索">
           <el-input
             v-model="filters.q"
             class="search-input"
             clearable
             placeholder="用户名或显示名称"
           />
-        </el-form-item>
+          </el-form-item>
 
-        <el-form-item label="系统角色">
+          <el-form-item label="系统角色">
           <el-select
             v-model="filters.systemRole"
             class="role-select"
@@ -517,9 +488,9 @@ onMounted(() => {
             <el-option label="ADMIN" value="ADMIN" />
             <el-option label="USER" value="USER" />
           </el-select>
-        </el-form-item>
+          </el-form-item>
 
-        <el-form-item label="启用状态">
+          <el-form-item label="启用状态">
           <el-select
             v-model="filters.active"
             class="active-select"
@@ -527,19 +498,22 @@ onMounted(() => {
             <el-option label="启用" :value="true" />
             <el-option label="停用" :value="false" />
           </el-select>
-        </el-form-item>
+          </el-form-item>
+        </div>
 
-        <el-form-item>
+        <div class="filter-actions" role="group" aria-label="筛选操作">
           <el-button
             native-type="submit"
             type="primary"
           >
+            <MaterialIcon name="search" />
             查询
           </el-button>
           <el-button @click="handleReset">
+            <MaterialIcon name="filter_list_off" />
             重置
           </el-button>
-        </el-form-item>
+        </div>
       </el-form>
     </section>
 
@@ -548,10 +522,10 @@ onMounted(() => {
       data-testid="user-content"
       :data-state="pageState"
     >
-      <el-skeleton
+      <div
         v-if="pageState === 'initialLoading'"
-        animated
-        :rows="6"
+        aria-label="加载中"
+        class="initial-loading-space"
       />
 
       <div
@@ -573,58 +547,31 @@ onMounted(() => {
       </div>
 
       <template v-else>
-        <el-alert
-          v-if="pageState === 'refreshing'"
-          class="refresh-alert"
-          :closable="false"
-          title="正在刷新用户数据"
-          type="info"
-          show-icon
-        />
-
-        <el-empty
-          v-if="pageState === 'empty'"
-          :description="
-            hasActiveFilters
-              ? '没有符合条件的用户'
-              : '当前没有用户数据'
-          "
-        >
-          <el-button
-            v-if="hasActiveFilters"
-            @click="handleReset"
-          >
-            清除筛选
-          </el-button>
-        </el-empty>
-
-        <template v-else>
-          <div class="table-card">
+        <div class="table-card">
             <div class="table-scroll">
               <el-table
                 :data="users"
                 row-key="id"
               >
               <el-table-column
-                label="用户 ID"
-                prop="id"
-                show-overflow-tooltip
-                width="72"
-              />
-
-              <el-table-column
                 label="用户名"
                 min-width="108"
-                prop="username"
                 show-overflow-tooltip
-              />
+              >
+                <template #default="{ row }">
+                  <UserLink :user-id="row.id">{{ row.username }}</UserLink>
+                </template>
+              </el-table-column>
 
               <el-table-column
                 label="显示名称"
                 min-width="108"
-                prop="displayName"
                 show-overflow-tooltip
-              />
+              >
+                <template #default="{ row }">
+                  <UserLink :user-id="row.id">{{ row.displayName }}</UserLink>
+                </template>
+              </el-table-column>
 
               <el-table-column label="角色" min-width="84">
                 <template #default="{ row }">
@@ -694,6 +641,23 @@ onMounted(() => {
                   </div>
                 </template>
               </el-table-column>
+
+              <template #empty>
+                <el-empty
+                  :description="
+                    hasActiveFilters
+                      ? '没有符合条件的用户'
+                      : '当前没有可见用户'
+                  "
+                >
+                  <el-button
+                    v-if="hasActiveFilters"
+                    @click="handleReset"
+                  >
+                    重置筛选
+                  </el-button>
+                </el-empty>
+              </template>
             </el-table>
             </div>
 
@@ -704,16 +668,13 @@ onMounted(() => {
               <el-pagination
                 class="user-pagination"
                 :current-page="page + 1"
-                layout="total, sizes, prev, pager, next"
-                :page-size="size"
-                :page-sizes="[10, 20, 50]"
+                layout="total, prev, pager, next"
+                :page-size="PAGE_SIZE"
                 :total="totalElements"
                 @current-change="handlePageChange"
-                @size-change="handleSizeChange"
               />
             </footer>
-          </div>
-        </template>
+        </div>
       </template>
     </section>
 
@@ -736,7 +697,7 @@ onMounted(() => {
       v-model="detailDrawerVisible"
       class="user-detail-drawer"
       direction="rtl"
-      size="400px"
+      size="min(400px, 100%)"
       title="用户详情"
     >
       <div
@@ -753,10 +714,10 @@ onMounted(() => {
 
           <div class="detail-hero-copy">
             <h2 class="detail-name">
-              {{ detailUser.displayName }}
+              <UserLink :user-id="detailUser.id">{{ detailUser.displayName }}</UserLink>
             </h2>
             <p class="detail-username">
-              @{{ detailUser.username }}
+              <UserLink :user-id="detailUser.id">@{{ detailUser.username }}</UserLink>
             </p>
 
             <div class="detail-badges">
@@ -780,34 +741,12 @@ onMounted(() => {
 
         <section class="detail-section">
           <h3 class="detail-section-title">
-            账号信息
-          </h3>
-
-          <div class="detail-fields">
-            <div class="detail-field detail-field--full">
-              <el-icon class="detail-field-icon">
-                <UserIcon />
-              </el-icon>
-              <div class="detail-field-body">
-                <span class="detail-field-label">用户 ID</span>
-                <span class="detail-field-value">
-                  {{ detailUser.id }}
-                </span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="detail-section">
-          <h3 class="detail-section-title">
             联系方式
           </h3>
 
           <div class="detail-fields">
             <div class="detail-field detail-field--full">
-              <el-icon class="detail-field-icon">
-                <Phone />
-              </el-icon>
+              <MaterialIcon class="detail-field-icon" name="phone" />
               <div class="detail-field-body">
                 <span class="detail-field-label">手机号</span>
                 <span class="detail-field-value">
@@ -817,9 +756,7 @@ onMounted(() => {
             </div>
 
             <div class="detail-field detail-field--full">
-              <el-icon class="detail-field-icon">
-                <Message />
-              </el-icon>
+              <MaterialIcon class="detail-field-icon" name="mail" />
               <div class="detail-field-body">
                 <span class="detail-field-label">邮箱</span>
                 <span class="detail-field-value detail-field-value--break">
@@ -837,9 +774,7 @@ onMounted(() => {
 
           <div class="detail-fields detail-fields--split">
             <div class="detail-field">
-              <el-icon class="detail-field-icon">
-                <Clock />
-              </el-icon>
+              <MaterialIcon class="detail-field-icon" name="schedule" />
               <div class="detail-field-body">
                 <span class="detail-field-label">创建时间</span>
                 <span class="detail-field-value">
@@ -849,9 +784,7 @@ onMounted(() => {
             </div>
 
             <div class="detail-field">
-              <el-icon class="detail-field-icon">
-                <Clock />
-              </el-icon>
+              <MaterialIcon class="detail-field-icon" name="schedule" />
               <div class="detail-field-body">
                 <span class="detail-field-label">更新时间</span>
                 <span class="detail-field-value">
@@ -872,16 +805,16 @@ onMounted(() => {
             关闭
           </el-button>
           <el-button
-            :icon="Key"
             @click="openResetFromDetail"
           >
+            <MaterialIcon name="key" />
             重置密码
           </el-button>
           <el-button
-            :icon="Edit"
             type="primary"
             @click="openEditFromDetail"
           >
+            <MaterialIcon name="edit" />
             编辑用户
           </el-button>
         </div>
@@ -897,7 +830,7 @@ onMounted(() => {
         v-if="resetTargetUser"
         class="dialog-note"
       >
-        为用户 {{ resetTargetUser.displayName }} 设置新密码。成功后该用户所有 Session 将失效。
+        为用户 {{ resetTargetUser.displayName }} 设置新密码，成功后该用户所有 Session 将失效
       </p>
 
       <el-form
@@ -970,6 +903,7 @@ onMounted(() => {
 
 .header-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -981,16 +915,12 @@ onMounted(() => {
 }
 
 .filter-panel {
-  padding: 16px 16px 0;
+  padding: 16px;
 }
 
 .content-panel {
-  padding: 20px;
-}
-
-.content-panel[data-state='initialLoading'],
-.content-panel[data-state='empty'] {
   min-height: 320px;
+  padding: 20px;
 }
 
 .content-panel[data-state='error'] {
@@ -998,12 +928,9 @@ onMounted(() => {
 }
 
 .table-card {
-  width: 66.6667%;
+  width: 100%;
   max-width: 100%;
   overflow: hidden;
-  border: 1px solid var(--fs-color-border, #dbe3ee);
-  border-radius: var(--fs-radius-md, 8px);
-  background: var(--fs-color-surface, #fff);
 }
 
 .table-scroll {
@@ -1021,9 +948,7 @@ onMounted(() => {
 .table-footer {
   display: flex;
   justify-content: flex-end;
-  padding: 8px 12px;
-  border-top: 1px solid var(--fs-color-border, #dbe3ee);
-  background: var(--fs-color-surface-muted, #f8fafc);
+  padding-top: 16px;
 }
 
 .feedback-state {
@@ -1034,21 +959,17 @@ onMounted(() => {
   justify-items: center;
 }
 
-.refresh-alert {
-  margin-bottom: 12px;
-}
-
 .user-pagination {
   justify-content: flex-end;
 }
 
 .role-select,
 .active-select {
-  width: 112px;
+  width: 100%;
 }
 
 .search-input {
-  width: 176px;
+  width: 100%;
 }
 
 .row-actions {
@@ -1213,8 +1134,5 @@ onMounted(() => {
     padding: 16px;
   }
 
-  .table-card {
-    width: 100%;
-  }
 }
 </style>

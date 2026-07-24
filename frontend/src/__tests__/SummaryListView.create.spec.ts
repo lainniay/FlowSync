@@ -19,8 +19,6 @@ const routeState = vi.hoisted(() => ({
   query: {} as Record<string, unknown>,
 }))
 
-const routerPush = vi.hoisted(() => vi.fn<(location: unknown) => void>())
-
 vi.mock('@/views/summaries/api', () => ({
   createSummary: vi.fn<() => Promise<unknown>>(),
   getSummaries: vi.fn<typeof getSummaries>(),
@@ -43,13 +41,12 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('vue-router', () => ({
   useRoute: () => routeState,
   useRouter: () => ({
-    push: routerPush,
+    push: vi.fn<(location: unknown) => void>(),
   }),
 }))
 
 beforeEach(() => {
   routeState.query = {}
-  routerPush.mockReset()
 
   vi.mocked(getProject).mockReset()
   vi.mocked(getProject).mockResolvedValue({
@@ -122,12 +119,7 @@ describe('SummaryListView create dialog defaults', () => {
     expect(getProject).toHaveBeenCalledWith('101')
     expect(vm.createForm.projectId).toBe('101')
 
-    await wrapper.get('[data-testid="back-to-project"]').trigger('click')
-
-    expect(routerPush).toHaveBeenCalledWith({
-      name: 'project-detail',
-      params: { projectId: '101' },
-    })
+    expect(wrapper.find('[data-testid="back-to-project"]').exists()).toBe(false)
   })
 
   it('hides create action for an archived route project', async () => {

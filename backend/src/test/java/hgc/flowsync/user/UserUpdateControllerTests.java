@@ -143,6 +143,29 @@ class UserUpdateControllerTests {
 	}
 
 	@Test
+	void authenticatedUsersCanViewAnotherUsersContactProfileWithoutInternalId() throws Exception {
+		User viewer = insertUser(SystemRole.USER);
+		User target = insertUser(SystemRole.USER);
+		target.setPhone("13900000001");
+		target.setEmail("target@example.test");
+		userMapper.updateById(target);
+
+		mockMvc.perform(get("/api/users/{userId}/profile", target.getId())
+				.session(login(viewer).session()))
+			.andExpect(status().isOk())
+			.andExpect(content().contentType(MediaType.APPLICATION_JSON))
+			.andExpect(jsonPath("$.id").doesNotExist())
+			.andExpect(jsonPath("$.username").value(target.getUsername()))
+			.andExpect(jsonPath("$.displayName").value(target.getDisplayName()))
+			.andExpect(jsonPath("$.phone").value("13900000001"))
+			.andExpect(jsonPath("$.email").value("target@example.test"))
+			.andExpect(jsonPath("$.systemRole").value("USER"))
+			.andExpect(jsonPath("$.active").value(true));
+		mockMvc.perform(get("/api/users/{userId}/profile", target.getId()))
+			.andExpect(status().isUnauthorized());
+	}
+
+	@Test
 	void updatePreservesTheLastActiveAdmin() throws Exception {
 		User admin = insertUser(SystemRole.ADMIN);
 		LoginSession adminSession = login(admin);

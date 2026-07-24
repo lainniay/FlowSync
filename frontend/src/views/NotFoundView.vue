@@ -10,7 +10,7 @@ import 'element-plus/es/components/result/style/css'
 <template>
   <el-result
     icon="info"
-    sub-title="请检查地址，或返回工作台继续操作。"
+    sub-title="请检查地址，或返回工作台继续操作"
     title="404 页面不存在"
   >
     <template #extra>

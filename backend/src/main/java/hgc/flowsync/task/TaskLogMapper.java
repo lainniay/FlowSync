@@ -21,14 +21,19 @@ public interface TaskLogMapper extends BaseMapper<TaskLog> {
 		"<foreach collection='projectIds' item='projectId' open='(' separator=',' close=')'>",
 		"#{projectId}",
 		"</foreach>",
+		"<if test='userId != null'>",
+		"AND (task_logs.operator_id = #{userId} OR tasks.assignee_id = #{userId})",
+		"</if>",
 		"ORDER BY task_logs.created_at DESC, task_logs.id DESC LIMIT 10",
 		"</script>"
 	})
-	List<RecentActivity> selectRecentActivitiesQuery(@Param("projectIds") List<Long> projectIds);
+	List<RecentActivity> selectRecentActivitiesQuery(
+		@Param("projectIds") List<Long> projectIds,
+		@Param("userId") Long userId);
 
-	default List<RecentActivity> selectRecentActivities(List<Long> projectIds) {
+	default List<RecentActivity> selectRecentActivities(List<Long> projectIds, Long userId) {
 		return projectIds == null || projectIds.isEmpty()
-			? List.of() : selectRecentActivitiesQuery(projectIds);
+			? List.of() : selectRecentActivitiesQuery(projectIds, userId);
 	}
 
 	class RecentActivity {

@@ -27,9 +27,7 @@ export type SummaryListQuery = PaginationQuery & {
 
 export type SummaryListFilters = {
   projectId: string
-  taskId: string
   type: SummaryType | ''
-  createdBy: string
 }
 
 export type CreateSummaryBody = {

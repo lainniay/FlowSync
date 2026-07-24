@@ -69,7 +69,11 @@ describe('ProfileView', () => {
         .attributes('data-state'),
     ).toBe('success')
     expect(wrapper.text()).toContain('zhangsan')
-    expect(wrapper.text()).toContain('修改资料')
+    expect(wrapper.text()).toContain('个人资料')
+    expect(wrapper.text()).toContain('用户 ID')
+    expect(wrapper.text()).toContain('13800000000')
+    expect(wrapper.text()).toContain('zhangsan@example.com')
+    expect(wrapper.text()).toContain('安全设置')
   })
 
   it('shows error when the current user is missing', async () => {

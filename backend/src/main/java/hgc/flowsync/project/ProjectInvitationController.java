@@ -9,6 +9,7 @@ import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -20,8 +21,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.validation.annotation.Validated;
 
 @RestController
+@Validated
 public class ProjectInvitationController {
 
 	private final ProjectInvitationService projectInvitationService;
@@ -44,6 +47,14 @@ public class ProjectInvitationController {
 		Authentication authentication,
 		@PathVariable Long projectId) {
 		return projectInvitationService.findByProject(authentication, projectId);
+	}
+
+	@GetMapping("/api/projects/{projectId}/invitation-candidates")
+	List<InvitationCandidateResponse> invitationCandidates(
+		Authentication authentication,
+		@PathVariable Long projectId,
+		@RequestParam @Size(min = 2, max = 100) String q) {
+		return projectInvitationService.findCandidates(authentication, projectId, q);
 	}
 
 	@DeleteMapping("/api/projects/{projectId}/invitations/{invitationId}")

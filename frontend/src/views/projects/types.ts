@@ -34,14 +34,22 @@ export type ProjectListQuery = PaginationQuery & {
   readonly q?: string
   readonly status?: ProjectStatus
   readonly ownerId?: string
+  readonly userId?: string
+  readonly myRole?: 'OWNER' | 'MEMBER'
   readonly archived?: boolean
 }
 
 export type ProjectListFilters = {
   q: string
   status: ProjectStatus | ''
-  ownerId: string
+  userId: string
+  myRole: '' | 'OWNER' | 'MEMBER'
   archived: boolean
+}
+
+export type UserOption = {
+  readonly id: string
+  readonly username: string
 }
 
 export type CreateProjectRequest = {
@@ -87,4 +95,10 @@ export type ProjectInvitation = {
 
 export type BatchUserIdsRequest = {
   readonly userIds: readonly string[]
+}
+
+export type InvitationCandidate = {
+  readonly id: string
+  readonly displayName: string
+  readonly username: string
 }

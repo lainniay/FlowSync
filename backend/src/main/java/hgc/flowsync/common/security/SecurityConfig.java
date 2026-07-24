@@ -4,6 +4,7 @@ import hgc.flowsync.common.error.ErrorCode;
 import hgc.flowsync.common.error.ProblemDetailResponseWriter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -22,6 +23,7 @@ import org.springframework.security.web.session.HttpSessionEventPublisher;
 public class SecurityConfig {
 
 	@Bean
+	@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 	SecurityFilterChain securityFilterChain(
 		HttpSecurity http,
 		ProblemDetailResponseWriter problemWriter,
@@ -70,6 +72,7 @@ public class SecurityConfig {
 	}
 
 	@Bean
+	@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 	AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception {
 		return configuration.getAuthenticationManager();
 	}
@@ -85,6 +88,7 @@ public class SecurityConfig {
 	}
 
 	@Bean
+	@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 	HttpSessionEventPublisher httpSessionEventPublisher() {
 		return new HttpSessionEventPublisher();
 	}

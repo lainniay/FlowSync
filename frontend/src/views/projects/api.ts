@@ -4,6 +4,7 @@ import { http } from '@/shared/api/http'
 import type {
   BatchUserIdsRequest,
   CreateProjectRequest,
+  InvitationCandidate,
   Project,
   ProjectInvitation,
   ProjectListQuery,
@@ -11,7 +12,16 @@ import type {
   ProjectPage,
   TransferProjectOwnerRequest,
   UpdateProjectRequest,
+  UserOption,
 } from './types'
+
+export async function getUserOptions(query?: string): Promise<readonly UserOption[]> {
+  const response = await http.get<readonly UserOption[]>('/user-options', {
+    params: { q: query || undefined },
+  })
+
+  return response.data
+}
 
 export async function getProjects(
   query: ProjectListQuery,
@@ -158,6 +168,18 @@ export async function getProjectInvitations(
 ): Promise<readonly ProjectInvitation[]> {
   const response = await http.get<readonly ProjectInvitation[]>(
     `/projects/${projectId}/invitations`,
+  )
+
+  return response.data
+}
+
+export async function getInvitationCandidates(
+  projectId: string,
+  query: string,
+): Promise<readonly InvitationCandidate[]> {
+  const response = await http.get<readonly InvitationCandidate[]>(
+    `/projects/${projectId}/invitation-candidates`,
+    { params: { q: query } },
   )
 
   return response.data

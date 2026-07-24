@@ -83,6 +83,15 @@ public interface TaskMapper extends BaseMapper<Task> {
 				.last("LIMIT 10"));
 	}
 
+	default List<Task> selectRecentByProjectIdsAndUserId(List<Long> projectIds, Long userId) {
+		return projectIds == null || projectIds.isEmpty() ? List.of()
+			: selectList(Wrappers.<Task>lambdaQuery()
+				.in(Task::getProjectId, projectIds)
+				.and(query -> query.eq(Task::getCreatorId, userId).or().eq(Task::getAssigneeId, userId))
+				.orderByDesc(Task::getCreatedAt, Task::getId)
+				.last("LIMIT 10"));
+	}
+
 	class LatestProgress {
 		private Long taskId;
 		private int progressPercent;

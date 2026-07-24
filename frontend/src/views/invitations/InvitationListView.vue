@@ -14,7 +14,6 @@ import {
   ElMessageBox,
   ElOption,
   ElSelect,
-  ElSkeleton,
   ElTable,
   ElTableColumn,
   ElTag,
@@ -28,12 +27,16 @@ import 'element-plus/es/components/message/style/css'
 import 'element-plus/es/components/message-box/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/skeleton/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
 
+import MaterialIcon from '@/components/MaterialIcon.vue'
+import ProjectLink from '@/components/ProjectLink.vue'
+import UserLink from '@/components/UserLink.vue'
+
 import { getApiErrorMessage } from '@/shared/api/errors'
+import { formatDateTime } from '@/shared/format'
 import type { InvitationStatus } from '@/shared/api/types'
 
 import {
@@ -56,15 +59,18 @@ const invitationStatusLabels: Record<InvitationStatus, string> = {
   CANCELLED: '已取消',
 }
 
+const DEFAULT_STATUS: InvitationStatus = 'PENDING'
+
 const invitations = ref<ReceivedInvitation[]>([])
-const statusFilter = ref<InvitationStatus | ''>('')
-const appliedStatus = ref<InvitationStatus | ''>('')
+const statusFilter = ref<InvitationStatus | ''>(DEFAULT_STATUS)
+const appliedStatus = ref<InvitationStatus | ''>(DEFAULT_STATUS)
 const loading = ref(false)
 const loaded = ref(false)
 const errorMessage = ref('')
 const actionLoadingId = ref<string | null>(null)
+let invitationRequestId = 0
 
-const hasActiveFilters = computed(() => appliedStatus.value !== '')
+const hasActiveFilters = computed(() => appliedStatus.value !== DEFAULT_STATUS)
 
 const pageState = computed<PageState>(() => {
   if (loading.value && !loaded.value) return 'initialLoading'
@@ -74,21 +80,27 @@ const pageState = computed<PageState>(() => {
 })
 
 async function loadInvitations(): Promise<void> {
+  const requestId = ++invitationRequestId
   loading.value = true
   errorMessage.value = ''
 
   try {
-    invitations.value = [...await getReceivedInvitations({
+    const result = await getReceivedInvitations({
       status: appliedStatus.value || undefined,
-    })]
+    })
+    if (requestId !== invitationRequestId) return
+    invitations.value = [...result]
   } catch (error) {
+    if (requestId !== invitationRequestId) return
     errorMessage.value = getApiErrorMessage(
       error,
       '邀请列表加载失败，请稍后重试',
     )
   } finally {
-    loading.value = false
-    loaded.value = true
+    if (requestId === invitationRequestId) {
+      loading.value = false
+      loaded.value = true
+    }
   }
 }
 
@@ -98,8 +110,8 @@ async function handleSearch(): Promise<void> {
 }
 
 async function handleReset(): Promise<void> {
-  statusFilter.value = ''
-  appliedStatus.value = ''
+  statusFilter.value = DEFAULT_STATUS
+  appliedStatus.value = DEFAULT_STATUS
   await loadInvitations()
 }
 
@@ -139,11 +151,6 @@ async function handleRespond(
   }
 }
 
-function formatDateTime(value: string | null): string {
-  if (!value) return '—'
-  return value.replace('T', ' ').slice(0, 16)
-}
-
 onMounted(() => {
   void loadInvitations()
 })
@@ -152,31 +159,23 @@ onMounted(() => {
 <template>
   <section class="invitation-page">
     <header class="page-header">
-      <div>
-        <h1>收到的邀请</h1>
-        <p>
-          查看并处理你收到的项目邀请。
-        </p>
-      </div>
+      <h1>收到的邀请</h1>
 
-      <el-button
-        :loading="loading"
-        @click="loadInvitations"
-      >
-        刷新
-      </el-button>
     </header>
 
     <section class="filter-panel">
       <el-form
-        :inline="true"
+        class="filter-layout"
+        label-position="top"
         @submit.prevent="handleSearch"
       >
-        <el-form-item label="邀请状态">
+        <div class="filter-fields">
+          <el-form-item label="邀请状态">
           <el-select
             v-model="statusFilter"
             class="status-select"
             placeholder="全部状态"
+            @change="handleSearch"
           >
             <el-option label="全部状态" value="" />
             <el-option label="待处理" value="PENDING" />
@@ -184,19 +183,15 @@ onMounted(() => {
             <el-option label="已拒绝" value="REJECTED" />
             <el-option label="已取消" value="CANCELLED" />
           </el-select>
-        </el-form-item>
+          </el-form-item>
+        </div>
 
-        <el-form-item>
-          <el-button
-            native-type="submit"
-            type="primary"
-          >
-            查询
-          </el-button>
+        <div class="filter-actions" role="group" aria-label="筛选操作">
           <el-button @click="handleReset">
+            <MaterialIcon name="filter_list_off" />
             重置
           </el-button>
-        </el-form-item>
+        </div>
       </el-form>
     </section>
 
@@ -205,10 +200,10 @@ onMounted(() => {
       data-testid="invitation-content"
       :data-state="pageState"
     >
-      <el-skeleton
+      <div
         v-if="pageState === 'initialLoading'"
-        animated
-        :rows="6"
+        aria-label="加载中"
+        class="initial-loading-space"
       />
 
       <div
@@ -230,45 +225,25 @@ onMounted(() => {
       </div>
 
       <template v-else>
-        <el-alert
-          v-if="pageState === 'refreshing'"
-          class="refresh-alert"
-          :closable="false"
-          title="正在刷新邀请数据"
-          type="info"
-          show-icon
-        />
-
-        <el-empty
-          v-if="pageState === 'empty'"
-          :description="
-            hasActiveFilters
-              ? '没有符合条件的邀请'
-              : '当前没有收到的邀请'
-          "
-        >
-          <el-button
-            v-if="hasActiveFilters"
-            @click="handleReset"
-          >
-            清除筛选
-          </el-button>
-        </el-empty>
-
         <el-table
-          v-else
           :data="invitations"
           row-key="id"
         >
           <el-table-column label="项目" min-width="160">
             <template #default="{ row }">
-              {{ row.project.name }}
+              <ProjectLink
+                v-if="row.status === 'ACCEPTED'"
+                :project-id="row.project.id"
+              >
+                {{ row.project.name }}
+              </ProjectLink>
+              <span v-else>{{ row.project.name }}</span>
             </template>
           </el-table-column>
 
           <el-table-column label="邀请人" min-width="140">
             <template #default="{ row }">
-              {{ row.invitedBy.displayName }}
+              <UserLink :user-id="row.invitedBy.id">{{ row.invitedBy.displayName }}</UserLink>
             </template>
           </el-table-column>
 
@@ -311,6 +286,7 @@ onMounted(() => {
                   type="primary"
                   @click="handleRespond(row as ReceivedInvitation, 'ACCEPTED')"
                 >
+                  <MaterialIcon name="check" :size="18" />
                   接受
                 </el-button>
                 <el-button
@@ -319,12 +295,30 @@ onMounted(() => {
                   type="danger"
                   @click="handleRespond(row as ReceivedInvitation, 'REJECTED')"
                 >
+                  <MaterialIcon name="close" :size="18" />
                   拒绝
                 </el-button>
               </div>
               <span v-else class="muted">—</span>
             </template>
           </el-table-column>
+
+          <template #empty>
+            <el-empty
+              :description="
+                hasActiveFilters
+                  ? '没有符合条件的邀请'
+                  : '当前没有可见邀请'
+              "
+            >
+              <el-button
+                v-if="hasActiveFilters"
+                @click="handleReset"
+              >
+                重置筛选
+              </el-button>
+            </el-empty>
+          </template>
         </el-table>
       </template>
     </section>
@@ -334,7 +328,9 @@ onMounted(() => {
 <style scoped>
 .invitation-page {
   display: grid;
+  min-width: 0;
   gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .page-header {
@@ -363,16 +359,17 @@ onMounted(() => {
 }
 
 .filter-panel {
-  padding: 16px 16px 0;
+  padding: 16px;
 }
 
 .content-panel {
   min-height: 320px;
   padding: 20px;
+  overflow-x: auto;
 }
 
 .status-select {
-  width: 140px;
+  width: 100%;
 }
 
 .feedback-state {
@@ -381,10 +378,6 @@ onMounted(() => {
   align-content: center;
   gap: 16px;
   justify-items: center;
-}
-
-.refresh-alert {
-  margin-bottom: 12px;
 }
 
 .row-actions {
@@ -403,6 +396,7 @@ onMounted(() => {
 
   .content-panel {
     padding: 16px;
+    overflow-x: auto;
   }
 }
 </style>
